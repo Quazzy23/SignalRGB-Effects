@@ -1,0 +1,676 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <title>Effect Curve Studio</title>
+  <style>
+    body {
+      margin: 0;
+      padding: 20px;
+      background: #0f0f13;
+      color: #fff;
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 16px;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: 18px;
+      color: #00e5ff;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+    }
+
+    .top-bar {
+      display: flex;
+      gap: 12px;
+      background: #181822;
+      padding: 12px 20px;
+      border-radius: 8px;
+      border: 1px solid #2d2d3f;
+      align-items: center;
+      width: 820px;
+      box-sizing: border-box;
+    }
+
+    select, button {
+      background: #101017;
+      color: #00e5ff;
+      border: 1px solid #3d3d5c;
+      padding: 8px 12px;
+      border-radius: 6px;
+      font-size: 13px;
+      font-family: monospace;
+      outline: none;
+      cursor: pointer;
+    }
+
+    select:disabled {
+      color: #555;
+      border-color: #222;
+      cursor: not-allowed;
+    }
+
+    .main-layout {
+      display: flex;
+      gap: 20px;
+      width: 820px;
+    }
+
+    .canvas-card {
+      background: #181822;
+      padding: 20px;
+      border-radius: 8px;
+      border: 1px solid #2d2d3f;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      flex: 1;
+    }
+
+    canvas {
+      background: #0a0a0f;
+      border: 1px solid #28283a;
+      border-radius: 6px;
+      cursor: crosshair;
+      display: block;
+    }
+
+    .axis-labels {
+      display: flex;
+      justify-content: space-between;
+      font-size: 12px;
+      color: #00e5ff;
+      font-family: monospace;
+      font-weight: bold;
+    }
+
+    .sidebar {
+      width: 250px;
+      background: #181822;
+      padding: 20px;
+      border-radius: 8px;
+      border: 1px solid #2d2d3f;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+      box-sizing: border-box;
+    }
+
+    .section-title {
+      font-size: 11px;
+      color: #888;
+      text-transform: uppercase;
+      font-weight: bold;
+    }
+
+    .preset-grid {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .preset-btn {
+      text-align: left;
+      color: #ddd;
+    }
+
+    .preset-btn:hover {
+      background: #252538;
+      border-color: #00e5ff;
+      color: #00e5ff;
+    }
+
+    .save-btn {
+      background: #00e5ff;
+      color: #000;
+      font-weight: bold;
+      border: none;
+      padding: 12px;
+      font-size: 14px;
+      border-radius: 6px;
+      transition: all 0.15s ease;
+    }
+
+    .save-btn:hover {
+      background: #38eeff;
+      box-shadow: 0 0 15px rgba(0, 229, 255, 0.4);
+    }
+
+    .save-btn:disabled {
+      background: #333;
+      color: #666;
+      box-shadow: none;
+      cursor: not-allowed;
+    }
+
+    .status-msg {
+      font-size: 12px;
+      color: #00ff88;
+      font-family: monospace;
+      text-align: center;
+      min-height: 16px;
+    }
+  </style>
+</head>
+<body>
+
+  <h1>Effect Curve Studio</h1>
+
+  <!-- Панель навигации по коду -->
+  <div class="top-bar">
+    <button id="openBtn" onclick="userSelectFile()" style="background:#00e5ff; color:#000; font-weight:bold; border:none;">📂 Выбрать Effect.html</button>
+    
+    <select id="configSelect" onchange="onConfigChange()" disabled>
+      <option value="">[ Выберите CONFIG ]</option>
+    </select>
+
+    <select id="paramSelect" onchange="onParamChange()" disabled>
+      <option value="">[ Параметр ]</option>
+    </select>
+
+    <select id="subSelect" onchange="onSubChange()" disabled>
+      <option value="">[ Свойство ]</option>
+    </select>
+  </div>
+
+  <div class="main-layout">
+    <!-- Холст редактирования -->
+    <div class="canvas-card">
+      <div style="font-size:12px; color:#aaa;" id="targetLabel">Загрузка файла...</div>
+      <canvas id="curveCanvas" width="500" height="280"></canvas>
+      <div class="axis-labels">
+        <span id="minLabel">Min: 0</span>
+        <span style="color:#555;">Вероятность (0.0 — 1.0)</span>
+        <span id="maxLabel">Max: 100</span>
+      </div>
+      <div class="status-msg" id="statusMsg"></div>
+    </div>
+
+    <!-- Панель управления -->
+    <div class="sidebar">
+      <div class="section-title">Шаблоны кривых:</div>
+      <div class="preset-grid">
+        <button class="preset-btn" onclick="applyPreset('gaussian')">Гаусс (Колокол)</button>
+        <button class="preset-btn" onclick="applyPreset('uniform')">Равномерный (Шум)</button>
+        <button class="preset-btn" onclick="applyPreset('sharp')">Острая игла</button>
+        <button class="preset-btn" onclick="applyPreset('wide')">Пологий холм</button>
+        <button class="preset-btn" onclick="applyPreset('bimodal')">Два горба (Края)</button>
+      </div>
+
+      <hr style="border:none; border-top:1px solid #2d2d3f; margin:5px 0;">
+
+      <div class="section-title">Свои шаблоны:</div>
+      <div style="display:flex; gap:6px;">
+        <input id="tmplName" type="text" placeholder="Имя шаблона" style="flex:1; background:#101017; border:1px solid #3d3d5c; color:#fff; padding:6px; border-radius:4px; font-size:11px;">
+        <button onclick="saveCustomTemplate()" style="padding:6px 10px; font-size:11px;">+</button>
+      </div>
+      <select id="tmplSelect" onchange="loadCustomTemplate()" style="font-size:11px; padding:6px;">
+        <option value="">[ Мои сохраненные ]</option>
+      </select>
+
+      <hr style="border:none; border-top:1px solid #2d2d3f; margin:5px 0;">
+
+      <button id="saveBtn" class="save-btn" onclick="applyToFile()" disabled>💾 Применить в файл</button>
+    </div>
+  </div>
+
+  <script>
+    let fileHandle = null;
+    let fileText = "";
+    let parsedData = {};
+
+    const PRESETS = {
+      gaussian: [0.05, 0.3, 0.8, 1.0, 0.8, 0.3, 0.05],
+      uniform:  [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
+      sharp:    [0.0, 0.05, 0.3, 1.0, 0.3, 0.05, 0.0],
+      wide:     [0.4, 0.7, 0.95, 1.0, 0.95, 0.7, 0.4],
+      bimodal:  [1.0, 0.3, 0.05, 0.0, 0.05, 0.3, 1.0]
+    };
+
+    let activePoints = [...PRESETS.gaussian];
+    let activeMin = 0;
+    let activeMax = 100;
+    let draggingIdx = -1;
+
+    const canvas = document.getElementById("curveCanvas");
+    const ctx = canvas.getContext("2d");
+    const W = canvas.width;
+    const H = canvas.height;
+    const PAD = 20;
+
+    // =========================================================================
+    // 🧠 СИСТЕМА АВТО-ПАМЯТИ ЧЕРЕЗ INDEXEDDB (НАВСЕГДА ЗАПОМИНАЕТ ФАЙЛ)
+    // =========================================================================
+    function getDB() {
+      return new Promise((resolve) => {
+        const req = indexedDB.open("CurveStudioDB", 1);
+        req.onupgradeneeded = () => req.result.createObjectStore("handles");
+        req.onsuccess = () => resolve(req.result);
+      });
+    }
+
+    async function saveHandleToDB(handle) {
+      const db = await getDB();
+      const tx = db.transaction("handles", "readwrite");
+      tx.objectStore("handles").put(handle, "lastEffectFile");
+    }
+
+    async function getHandleFromDB() {
+      const db = await getDB();
+      return new Promise((resolve) => {
+        const tx = db.transaction("handles", "readonly");
+        const req = tx.objectStore("handles").get("lastEffectFile");
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => resolve(null);
+      });
+    }
+
+    // Авто-загрузка сохраненного файла при старте
+    async function tryAutoLoadFile() {
+      try {
+        const savedHandle = await getHandleFromDB();
+        if (savedHandle) {
+          // Запрашиваем подтверждение прав доступа
+          const perm = await savedHandle.queryPermission({ mode: 'readwrite' });
+          if (perm === 'granted' || (await savedHandle.requestPermission({ mode: 'readwrite' })) === 'granted') {
+            fileHandle = savedHandle;
+            await loadFileContent();
+            return;
+          }
+        }
+      } catch (e) {
+        console.log("Автозагрузка ожидает ручного выбора файла.");
+      }
+      document.getElementById("targetLabel").innerText = "Нажмите «Выбрать Effect.html», чтобы начать";
+    }
+
+    async function userSelectFile() {
+      try {
+        [fileHandle] = await window.showOpenFilePicker({
+          types: [{ description: 'HTML Files', accept: { 'text/html': ['.html'] } }]
+        });
+        await saveHandleToDB(fileHandle);
+        await loadFileContent();
+      } catch (err) {
+        console.warn("Выбор отменен:", err);
+      }
+    }
+
+    async function loadFileContent() {
+      const file = await fileHandle.getFile();
+      fileText = await file.text();
+      parseFile();
+      document.getElementById("openBtn").innerText = "✔ " + file.name;
+      document.getElementById("statusMsg").innerText = "Файл подключен!";
+
+      // Восстанавливаем последний выбранный параметр
+      restoreLastSelection();
+    }
+
+    // 2. ПАРСИНГ КОДА НАПРЯМУЮ С ПОДДЕРЖКОЙ ЛЮБОЙ ВЛОЖЕННОСТИ
+    function parseFile() {
+      parsedData = {};
+      const cfgRegex = /const\s+([A-Z0-9_]+_CONFIG)\s*=\s*\{([\s\S]*?)\n\s*\};/g;
+      let cfgMatch;
+
+      while ((cfgMatch = cfgRegex.exec(fileText)) !== null) {
+        const cfgName = cfgMatch[1];
+        const cfgBody = cfgMatch[2];
+        const cfgBodyStart = cfgMatch.index + cfgMatch[0].indexOf(cfgBody);
+        parsedData[cfgName] = {};
+
+        let pos = 0;
+        while (pos < cfgBody.length) {
+          const match = cfgBody.slice(pos).match(/(\w+)\s*:\s*\{/);
+          if (!match) break;
+
+          const paramName = match[1];
+          const startIndex = pos + match.index + match[0].length;
+          let depth = 1;
+          let endIndex = startIndex;
+
+          while (endIndex < cfgBody.length && depth > 0) {
+            if (cfgBody[endIndex] === '{') depth++;
+            else if (cfgBody[endIndex] === '}') depth--;
+            endIndex++;
+          }
+
+          const paramBody = cfgBody.substring(startIndex, endIndex - 1);
+          const paramBodyStart = cfgBodyStart + startIndex;
+          parsedData[cfgName][paramName] = {};
+
+          const tupleRegex = /(\w+)\s*:\s*\[\s*([\d\.-]+)\s*,\s*([\d\.-]+)\s*,\s*\[([\d\.,\s]+)\]\s*\]/g;
+          let tupleMatch;
+
+          while ((tupleMatch = tupleRegex.exec(paramBody)) !== null) {
+            const subName = tupleMatch[1];
+            const min = parseFloat(tupleMatch[2]);
+            const max = parseFloat(tupleMatch[3]);
+            const points = tupleMatch[4].split(',').map(n => parseFloat(n.trim())).filter(n => !isNaN(n));
+
+            const absStart = paramBodyStart + tupleMatch.index;
+            const absEnd = absStart + tupleMatch[0].length;
+
+            parsedData[cfgName][paramName][subName] = {
+              min: min,
+              max: max,
+              points: points.length === 7 ? points : [...PRESETS.gaussian],
+              start: absStart,
+              end: absEnd
+            };
+          }
+
+          pos = endIndex;
+        }
+      }
+
+      buildConfigSelect();
+    }
+
+    // 3. УПРАВЛЕНИЕ СПИСКАМИ
+    function buildConfigSelect() {
+      const sel = document.getElementById("configSelect");
+      sel.innerHTML = '<option value="">[ Выберите CONFIG ]</option>';
+      for (let cfg in parsedData) {
+        if (Object.keys(parsedData[cfg]).length > 0) {
+          sel.innerHTML += `<option value="${cfg}">${cfg}</option>`;
+        }
+      }
+      sel.disabled = false;
+    }
+
+    function onConfigChange() {
+      const cfg = document.getElementById("configSelect").value;
+      localStorage.setItem("last_cfg", cfg);
+
+      const paramSel = document.getElementById("paramSelect");
+      paramSel.innerHTML = '<option value="">[ Параметр ]</option>';
+
+      if (cfg && parsedData[cfg]) {
+        for (let p in parsedData[cfg]) {
+          if (Object.keys(parsedData[cfg][p]).length > 0) {
+            paramSel.innerHTML += `<option value="${p}">${p}</option>`;
+          }
+        }
+        paramSel.disabled = false;
+      }
+      document.getElementById("subSelect").disabled = true;
+      document.getElementById("saveBtn").disabled = true;
+    }
+
+    function onParamChange() {
+      const cfg = document.getElementById("configSelect").value;
+      const param = document.getElementById("paramSelect").value;
+      localStorage.setItem("last_param", param);
+
+      const subSel = document.getElementById("subSelect");
+      subSel.innerHTML = '<option value="">[ Свойство ]</option>';
+
+      if (cfg && param && parsedData[cfg][param]) {
+        for (let s in parsedData[cfg][param]) {
+          subSel.innerHTML += `<option value="${s}">${s}</option>`;
+        }
+        subSel.disabled = false;
+      }
+      document.getElementById("saveBtn").disabled = true;
+    }
+
+    function onSubChange() {
+      const cfg = document.getElementById("configSelect").value;
+      const param = document.getElementById("paramSelect").value;
+      const sub = document.getElementById("subSelect").value;
+      localStorage.setItem("last_sub", sub);
+
+      if (cfg && param && sub && parsedData[cfg][param][sub]) {
+        const item = parsedData[cfg][param][sub];
+        activeMin = item.min;
+        activeMax = item.max;
+        activePoints = [...item.points];
+
+        document.getElementById("minLabel").innerText = `Min: ${activeMin}`;
+        document.getElementById("maxLabel").innerText = `Max: ${activeMax}`;
+        document.getElementById("targetLabel").innerText = `${cfg} ➔ ${param} ➔ ${sub}`;
+        document.getElementById("saveBtn").disabled = false;
+
+        draw();
+      }
+    }
+
+    // Авто-восстановление позиции
+    function restoreLastSelection() {
+      const lastCfg = localStorage.getItem("last_cfg");
+      const lastParam = localStorage.getItem("last_param");
+      const lastSub = localStorage.getItem("last_sub");
+
+      const cfgSel = document.getElementById("configSelect");
+      if (lastCfg && parsedData[lastCfg]) {
+        cfgSel.value = lastCfg;
+        onConfigChange();
+
+        const paramSel = document.getElementById("paramSelect");
+        if (lastParam && parsedData[lastCfg][lastParam]) {
+          paramSel.value = lastParam;
+          onParamChange();
+
+          const subSel = document.getElementById("subSelect");
+          if (lastSub && parsedData[lastCfg][lastParam][lastSub]) {
+            subSel.value = lastSub;
+            onSubChange();
+          }
+        }
+      }
+    }
+
+    // 4. ГРАФИКА
+    function toScreenX(idx) { return PAD + (idx / 6) * (W - PAD * 2); }
+    function toScreenY(val) { return (H - PAD) - val * (H - PAD * 2); }
+    function fromScreenY(sY) { return Math.max(0, Math.min(1, ((H - PAD) - sY) / (H - PAD * 2))); }
+
+    function sampleCurve() {
+      let cdf = [0];
+      let sum = 0;
+      for (let i = 0; i < 6; i++) {
+        let area = (activePoints[i] + activePoints[i+1]) / 2;
+        sum += Math.max(0.0001, area);
+        cdf.push(sum);
+      }
+      for (let i = 0; i < cdf.length; i++) cdf[i] /= sum;
+
+      const r = Math.random();
+      for (let i = 0; i < cdf.length - 1; i++) {
+        if (r >= cdf[i] && r <= cdf[i+1]) {
+          const t = (r - cdf[i]) / (cdf[i+1] - cdf[i]);
+          return (i + t) / 6;
+        }
+      }
+      return 0.5;
+    }
+
+    function draw() {
+      ctx.clearRect(0, 0, W, H);
+
+      // 1. Горизонтальная сетка (уровни вероятности)
+      ctx.strokeStyle = "#171722";
+      ctx.lineWidth = 1;
+      for (let y = 0; y <= 4; y++) {
+        let sy = toScreenY(y / 4);
+        ctx.beginPath(); ctx.moveTo(PAD, sy); ctx.lineTo(W - PAD, sy); ctx.stroke();
+      }
+
+      // 2. Вертикальные направляющие и ТОЧНЫЕ ПРОМЕЖУТОЧНЫЕ ЗНАЧЕНИЯ под каждой из 7 точек!
+      for (let i = 0; i < 7; i++) {
+        let sx = toScreenX(i);
+
+        // Вертикальная линия-гид
+        ctx.strokeStyle = (i === 0 || i === 6) ? "#2d2d42" : "#191926";
+        ctx.beginPath();
+        ctx.moveTo(sx, PAD);
+        ctx.lineTo(sx, H - PAD);
+        ctx.stroke();
+
+        // Расчет точного промежуточного значения
+        let val = activeMin + (i / 6) * (activeMax - activeMin);
+        let valStr = Number.isInteger(activeMin) && Number.isInteger(activeMax) && Number.isInteger(val)
+          ? Math.round(val)
+          : val.toFixed(1);
+
+        // Подпись цифры строго под точкой на шкале
+        ctx.fillStyle = (i === draggingIdx) ? "#00e5ff" : "#666680";
+        ctx.font = "bold 10px monospace";
+        ctx.textAlign = "center";
+        ctx.fillText(valStr, sx, H - 6);
+      }
+
+      // 3. Живая симуляция Монте-Карло (зеленая плотность)
+      let bins = new Array(40).fill(0);
+      for (let s = 0; s < 10000; s++) {
+        let val = sampleCurve();
+        bins[Math.min(39, Math.floor(val * 40))]++;
+      }
+      let maxBin = Math.max(...bins);
+      ctx.fillStyle = "rgba(0, 229, 255, 0.15)";
+      let bW = (W - PAD * 2) / 40;
+      for (let i = 0; i < 40; i++) {
+        let bH = (bins[i] / maxBin) * (H - PAD * 2);
+        ctx.fillRect(PAD + i * bW, H - PAD - bH, bW - 1, bH);
+      }
+
+      // 4. Линия кривой
+      ctx.beginPath();
+      ctx.strokeStyle = "#00e5ff";
+      ctx.lineWidth = 3;
+      for (let i = 0; i < 7; i++) {
+        let sx = toScreenX(i);
+        let sy = toScreenY(activePoints[i]);
+        if (i === 0) ctx.moveTo(sx, sy);
+        else ctx.lineTo(sx, sy);
+      }
+      ctx.stroke();
+
+      // 5. Точки и всплывающая подсказка над активной точкой
+      for (let i = 0; i < 7; i++) {
+        let sx = toScreenX(i);
+        let sy = toScreenY(activePoints[i]);
+
+        ctx.fillStyle = (i === draggingIdx) ? "#ffffff" : "#00e5ff";
+        ctx.beginPath();
+        ctx.arc(sx, sy, 6, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = "#101017";
+        ctx.lineWidth = 2;
+        ctx.stroke();
+
+        // Всплывающая подсказка над точкой, которую тащишь мышкой!
+        if (i === draggingIdx) {
+          let curVal = activeMin + (i / 6) * (activeMax - activeMin);
+          let curProb = Math.round(activePoints[i] * 100);
+          let tipText = `${curVal.toFixed(1)} (${curProb}%)`;
+
+          ctx.fillStyle = "#00e5ff";
+          ctx.font = "bold 11px monospace";
+          ctx.fillText(tipText, sx, sy - 12);
+        }
+      }
+    }
+
+    canvas.addEventListener("mousedown", (e) => {
+      const rect = canvas.getBoundingClientRect();
+      const mx = e.clientX - rect.left;
+      const my = e.clientY - rect.top;
+      for (let i = 0; i < 7; i++) {
+        if (Math.hypot(mx - toScreenX(i), my - toScreenY(activePoints[i])) < 15) {
+          draggingIdx = i;
+          break;
+        }
+      }
+    });
+
+    window.addEventListener("mousemove", (e) => {
+      if (draggingIdx !== -1) {
+        const rect = canvas.getBoundingClientRect();
+        activePoints[draggingIdx] = fromScreenY(e.clientY - rect.top);
+        draw();
+      }
+    });
+
+    window.addEventListener("mouseup", () => draggingIdx = -1);
+
+    // 5. ПРЕСЕТЫ
+    function applyPreset(name) {
+      if (PRESETS[name]) {
+        activePoints = [...PRESETS[name]];
+        draw();
+      }
+    }
+
+    function saveCustomTemplate() {
+      const name = document.getElementById("tmplName").value.trim();
+      if (!name) return alert("Введите имя шаблона!");
+      let saved = JSON.parse(localStorage.getItem("my_curves") || "{}");
+      saved[name] = activePoints.map(v => Number(v.toFixed(2)));
+      localStorage.setItem("my_curves", JSON.stringify(saved));
+      document.getElementById("tmplName").value = "";
+      loadTemplatesList();
+      alert(`Шаблон "${name}" сохранен!`);
+    }
+
+    function loadTemplatesList() {
+      const sel = document.getElementById("tmplSelect");
+      sel.innerHTML = '<option value="">[ Мои сохраненные ]</option>';
+      let saved = JSON.parse(localStorage.getItem("my_curves") || "{}");
+      for (let k in saved) {
+        sel.innerHTML += `<option value="${k}">${k}</option>`;
+      }
+    }
+
+    function loadCustomTemplate() {
+      const name = document.getElementById("tmplSelect").value;
+      if (!name) return;
+      let saved = JSON.parse(localStorage.getItem("my_curves") || "{}");
+      if (saved[name]) {
+        activePoints = [...saved[name]];
+        draw();
+      }
+    }
+
+    // 6. СОХРАНЕНИЕ В ФАЙЛ БЕЗ СБРОСА ПОЗИЦИИ!
+    async function applyToFile() {
+      const cfg = document.getElementById("configSelect").value;
+      const param = document.getElementById("paramSelect").value;
+      const sub = document.getElementById("subSelect").value;
+
+      if (!fileHandle || !parsedData[cfg] || !parsedData[cfg][param] || !parsedData[cfg][param][sub]) return;
+
+      const item = parsedData[cfg][param][sub];
+      const roundedPoints = activePoints.map(v => Number(v.toFixed(2)));
+      const newTupleStr = `${sub}: [${item.min}, ${item.max}, [${roundedPoints.join(', ')}]]`;
+
+      // Точечная замена по индексу символов в тексте
+      fileText = fileText.substring(0, item.start) + newTupleStr + fileText.substring(item.end);
+
+      // Перезаписываем файл на диске
+      const writable = await fileHandle.createWritable();
+      await writable.write(fileText);
+      await writable.close();
+
+      const msg = document.getElementById("statusMsg");
+      msg.innerText = `✔ СОХРАНЕНО: ${param} ➔ ${sub}`;
+      setTimeout(() => msg.innerText = "", 3000);
+
+      // Перепарсиваем файл, чтобы обновить абсолютные смещения
+      parseFile();
+      restoreLastSelection();
+    }
+
+    loadTemplatesList();
+    draw();
+
+    // Запускаем авто-подключение при открытии страницы!
+    tryAutoLoadFile();
+  </script>
+</body>
+</html>

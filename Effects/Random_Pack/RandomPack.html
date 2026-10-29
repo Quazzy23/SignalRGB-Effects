@@ -1,0 +1,2633 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <title>Random Pack</title>
+  <meta description="Random pack of SignalRGB store effects" />
+  <meta publisher="Quazzy Inc" />
+
+  <!-- 1. Effect Switch Interval (in Minutes, step 0.1 = 6 sec) -->
+  <meta property="minSwitchMin" label="Effect Switch: Min (Minutes)" type="number" min="1" max="1000" step="1" default="15" />
+  <meta property="maxSwitchMin" label="Effect Switch: Max (Minutes)" type="number" min="1" max="1000" step="1" default="45" />
+
+  <!-- 2. Night Mode: Sleep Time -->
+  <meta property="sleepHour" label="Sleep: Hour (0-23)" type="number" min="0" max="23" step="1" default="1" />
+  <meta property="sleepMinute" label="Sleep: Minute (0-59)" type="number" min="0" max="59" step="1" default="0" />
+
+  <!-- 3. Night Mode: Wake Time -->
+  <meta property="wakeHour" label="Wake: Hour (0-23)" type="number" min="0" max="23" step="1" default="11" />
+  <meta property="wakeMinute" label="Wake: Minute (0-59)" type="number" min="0" max="59" step="1" default="0" />
+
+  <!-- 4. Fade In / Out Duration -->
+  <meta property="fadeDuration" label="Fade Duration (Seconds)" type="number" min="1" max="300" step="1" default="60" />
+
+</head>
+<body style="margin: 0; padding: 0; background: #000; overflow: hidden;">
+  <canvas id="exCanvas" width="320" height="200"></canvas>
+
+  <script>
+    // =========================================================================
+    // DIAGNOSTIC LOGGER & GLOBAL CRASH INTERCEPTOR
+    // =========================================================================
+    const Logger = {
+      tag: '[MEGA-RANDOM]',
+      log(msg, ...args) {
+        console.log(`${this.tag}[INFO] ${msg}`, ...args);
+      },
+      warn(msg, ...args) {
+        console.warn(`${this.tag}[WARN] ${msg}`, ...args);
+      },
+      error(msg, err) {
+        const stack = err && err.stack ? `\nStack: ${err.stack}` : '';
+        console.error(`${this.tag}[CRITICAL ERROR] ${msg}${stack}`);
+      },
+      logMemory() {
+        if (window.performance && window.performance.memory) {
+          const m = window.performance.memory;
+          const usedMB = (m.usedJSHeapSize / 1048576).toFixed(2);
+          const totalMB = (m.totalJSHeapSize / 1048576).toFixed(2);
+          this.log(`[HEAP MONITOR] Used JS Heap: ${usedMB} MB / Total: ${totalMB} MB`);
+        }
+      }
+    };
+
+    // Перехват всех необработанных JS-исключений
+    window.onerror = function(message, source, lineno, colno, error) {
+      Logger.error(`Unhandled Exception at ${source}:${lineno}:${colno} - "${message}"`, error);
+      return false; // Позволяем SignalRGB тоже зафиксировать ошибку в своих логах
+    };
+
+    window.onunhandledrejection = function(e) {
+      Logger.error(`Unhandled Promise Rejection: ${e.reason}`);
+    };
+
+
+
+    // =========================================================================
+    // CONFIG: GLOBAL MANAGER
+    // =========================================================================
+    const GLOBAL_CONFIG = {
+      weights: { RainbowData: 12.5, PastelDream: 12.5, VaporWave: 12.5, Radar: 12.5, Rain: 12.5, LightsaberDuel: 12.5, Terminal: 12.5, SideToSide: 12.5 },
+      // Интервалы замера памяти (в миллисекундах)
+      dayMemoryLogIntervalMs: 5 * 60 * 1000,    // 5 минут днем
+      nightMemoryLogIntervalMs: 20 * 60 * 1000  // 20 минут ночью в режиме сна
+    };
+
+
+    // =========================================================================
+    // CONFIG: RAINBOW DATA
+    // =========================================================================
+    const RAINBOW_CONFIG = {
+      size:       { val: [5, 60, [0.02, 0.37, 0.95, 0.59, 0.2, 0.08, 0.01]], intervalSec: [5, 30, [0.26, 0.7, 0.92, 0.87, 0.54, 0.17, 0.02]], lerpSpeed: 0.01 },
+      fade:       { val: [10, 90, [0.05, 0.19, 0.57, 0.95, 0.88, 0.22, 0.02]], intervalSec: [5, 20, [0.41, 0.84, 1, 0.84, 0.49, 0.17, 0.02]], lerpSpeed: 0.01 },
+      speed:      { val: [8, 40, [0.06, 0.65, 0.91, 0.82, 0.45, 0.17, 0.02]], intervalSec: [10, 30, [0.15, 0.5, 0.9, 0.9, 0.62, 0.22, 0.02]], lerpSpeed: 0.01 },
+      cycleSpeed: { val: [10, 80, [0.05, 0.3, 0.8, 1.0, 0.8, 0.3, 0.05]], intervalSec: [10, 30, [0.41, 0.84, 1, 0.84, 0.49, 0.17, 0.02]], lerpSpeed: 0.01 },
+      colorMode:  { intervalSec: [20, 50, [0.05, 0.3, 0.8, 1.0, 0.8, 0.3, 0.05]], weights: { 'Color Cycle': 10, 'Rainbow Gradient': 40, 'Random': 50 } }
+    };
+
+    // =========================================================================
+    // CONFIG: PASTEL DREAM
+    // =========================================================================
+    const PASTEL_CONFIG = {
+      sizeRaw:  { val: [20, 80, [0.05, 0.3, 0.8, 1.0, 0.8, 0.3, 0.05]], intervalSec: [10, 30, [0.05, 0.15, 0.47, 0.85, 0.92, 0.77, 0.22]], lerpSpeed: 0.01 },
+      speedRaw: { val: [5, 40, [0.12, 0.92, 0.92, 0.62, 0.29, 0.12, 0.01]], intervalSec: [10, 30, [0.05, 0.59, 0.91, 0.84, 0.55, 0.23, 0.05]], lerpSpeed: 0.01 },
+      bgColor:  { h: [0, 360, [1, 1, 1, 1, 1, 1, 1]], s: [0, 60, [0.05, 0.3, 0.8, 1.0, 0.8, 0.3, 0.05]], l: [0, 0, [1, 1, 1, 1, 1, 1, 1]], intervalSec: [20, 50, [0.05, 0.3, 0.8, 1.0, 0.8, 0.3, 0.05]], lerpSpeed: 0.01 },
+      color1:   { h: [0, 360, [1, 1, 1, 1, 1, 1, 1]], s: [70, 90, [0.05, 0.3, 0.8, 1.0, 0.8, 0.3, 0.05]], l: [30, 60, [0.05, 0.3, 0.8, 1.0, 0.8, 0.3, 0.05]], intervalSec: [5, 30, [0.1, 0.75, 1, 0.92, 0.61, 0.3, 0.13]], lerpSpeed: 0.01 },
+      color2:   { h: [0, 360, [1, 1, 1, 1, 1, 1, 1]], s: [70, 90, [0.05, 0.3, 0.8, 1.0, 0.8, 0.3, 0.05]], l: [30, 60, [0.05, 0.3, 0.8, 1.0, 0.8, 0.3, 0.05]], intervalSec: [5, 30, [0.41, 0.84, 1, 0.84, 0.49, 0.17, 0.02]], lerpSpeed: 0.01 },
+      color3:   { h: [0, 360, [1, 1, 1, 1, 1, 1, 1]], s: [70, 90, [0.05, 0.3, 0.8, 1.0, 0.8, 0.3, 0.05]], l: [30, 60, [0.05, 0.3, 0.8, 1.0, 0.8, 0.3, 0.05]], intervalSec: [5, 30, [0.41, 0.84, 1, 0.84, 0.49, 0.17, 0.02]], lerpSpeed: 0.01 },
+      color4:   { h: [0, 360, [1, 1, 1, 1, 1, 1, 1]], s: [70, 90, [0.05, 0.3, 0.8, 1.0, 0.8, 0.3, 0.05]], l: [30, 60, [0.05, 0.3, 0.8, 1.0, 0.8, 0.3, 0.05]], intervalSec: [5, 30, [0.41, 0.84, 1, 0.84, 0.49, 0.17, 0.02]], lerpSpeed: 0.01 }
+    };
+
+    // =========================================================================
+    // CONFIG: VAPOR WAVE
+    // =========================================================================
+    const VAPOR_CONFIG = {
+      barSpawn:        { val: [2, 9, [0, 0.1, 0.49, 0.94, 0.3, 0.05, 0]], intervalSec: [5, 40, [0.35, 0.78, 0.93, 0.93, 0.64, 0.21, 0.05]], lerpSpeed: 0.01 },
+      effectSpeed:     { val: [2, 8, [0.57, 0.95, 0.85, 0.38, 0.14, 0.06, 0.01]], intervalSec: [5, 40, [0.41, 0.84, 1, 0.84, 0.49, 0.17, 0.02]], lerpSpeed: 0.01 },
+      barWidth:        { val: [5, 25, [0.05, 0.38, 0.9, 0.98, 0.6, 0.15, 0.02]], intervalSec: [10, 40, [0.41, 0.84, 1, 0.84, 0.49, 0.17, 0.02]], lerpSpeed: 0.01 },
+      lineColor:       { h: [0, 360, [1, 1, 1, 1, 1, 1, 1]], s: [70, 100, [0.05, 0.3, 0.8, 1.0, 0.8, 0.3, 0.05]], l: [30, 60, [0.05, 0.3, 0.8, 1.0, 0.8, 0.3, 0.05]], intervalSec: [10, 30, [0.05, 0.24, 0.71, 0.94, 0.91, 0.7, 0.36]], lerpSpeed: 0.01 },
+      secondColor:     { h: [0, 360, [1, 1, 1, 1, 1, 1, 1]], s: [0, 100, [0.05, 0.3, 0.8, 1.0, 0.8, 0.3, 0.05]], l: [0, 0, [1, 1, 1, 1, 1, 1, 1]], intervalSec: [20, 60, [0.05, 0.3, 0.8, 1.0, 0.8, 0.3, 0.05]], lerpSpeed: 0.01 },
+      tapBgColor:      { h: [0, 360, [1, 1, 1, 1, 1, 1, 1]], s: [0, 100, [0.05, 0.3, 0.8, 1.0, 0.8, 0.3, 0.05]], l: [0, 0, [1, 1, 1, 1, 1, 1, 1]], intervalSec: [20, 60, [0.05, 0.3, 0.8, 1.0, 0.8, 0.3, 0.05]], lerpSpeed: 0.01 },
+      randomColorLine: true
+    };
+
+    // =========================================================================
+    // CONFIG: RADAR
+    // =========================================================================
+    const RADAR_CONFIG = {
+      blipSize:      { val: [5, 25, [0.05, 0.25, 0.8, 0.96, 0.6, 0.17, 0.02]], intervalSec: [5, 20, [0.57, 0.92, 0.96, 0.67, 0.27, 0.08, 0.02]], lerpSpeed: 0.01 },
+      speed:         { val: [5, 40, [0.13, 0.76, 0.95, 0.84, 0.44, 0.06, 0.01]], intervalSec: [5, 30, [0.41, 0.84, 1, 0.84, 0.49, 0.17, 0.02]], lerpSpeed: 0.01 },
+      trail:         { val: [10, 50, [0.08, 0.25, 0.6, 0.92, 0.94, 0.79, 0.38]], intervalSec: [5, 20, [0.4, 0.72, 0.93, 1, 0.8, 0.3, 0.05]], lerpSpeed: 0.01 },
+      fgColor:       { h: [0, 360, [1, 1, 1, 1, 1, 1, 1]], s: [75, 100, [0.05, 0.3, 0.8, 1.0, 0.8, 0.3, 0.05]], l: [35, 50, [0.05, 0.3, 0.8, 1.0, 0.8, 0.3, 0.05]], intervalSec: [10, 30, [0.05, 0.27, 0.61, 0.86, 0.94, 0.7, 0.39]], lerpSpeed: 0.01 },
+      bColor:        { h: [0, 360, [1, 1, 1, 1, 1, 1, 1]], s: [75, 100, [0.05, 0.3, 0.8, 1.0, 0.8, 0.3, 0.05]], l: [30, 70, [0.05, 0.3, 0.8, 1.0, 0.8, 0.3, 0.05]], intervalSec: [10, 50, [0.05, 0.2, 0.69, 0.97, 0.85, 0.3, 0.05]], lerpSpeed: 0.01 },
+      rColor:        { h: [0, 360, [1, 1, 1, 1, 1, 1, 1]], s: [75, 100, [0.05, 0.3, 0.8, 1.0, 0.8, 0.3, 0.05]], l: [40, 100, [0.05, 0.3, 0.8, 1.0, 0.8, 0.3, 0.05]], intervalSec: [10, 30, [0.05, 0.3, 0.8, 1, 0.88, 0.65, 0.14]], lerpSpeed: 0.01 },
+      bgColor:       { h: [0, 360, [1, 1, 1, 1, 1, 1, 1]], s: [0, 0,   [0.05, 0.3, 0.8, 1.0, 0.8, 0.3, 0.05]], l: [0, 0,   [1, 1, 1, 1, 1, 1, 1]], intervalSec: [20, 60, [0.05, 0.3, 0.8, 1.0, 0.8, 0.3, 0.05]], lerpSpeed: 0.01 },
+      rainbowMode:   false,
+      enableBlips:   true,
+      enableRipples: true,
+      moveBlips:     true
+    };
+
+    // =========================================================================
+    // CONFIG: RAIN
+    // =========================================================================
+    const RAIN_CONFIG = {
+      speed:     { val: [40, 100, [0.14, 0.33, 0.63, 0.92, 0.94, 0.78, 0.17]], intervalSec: [20, 50, [0.04, 0.09, 0.53, 0.86, 0.92, 0.87, 0.67]], lerpSpeed: 0.03 },
+      size:      { val: [5, 20, [0.05, 0.37, 0.85, 1, 0.67, 0.3, 0.05]], intervalSec: [10, 40, [0.05, 0.3, 0.8, 1.0, 0.8, 0.3, 0.05]], lerpSpeed: 0.03 },
+      color:     { h: [0, 360, [1, 1, 1, 1, 1, 1, 1]], s: [70, 100, [0.05, 0.3, 0.8, 1.0, 0.8, 0.3, 0.05]], l: [0, 0, [1, 1, 1, 1, 1, 1, 1]], intervalSec: [10, 30, [0.05, 0.3, 0.8, 1, 0.83, 0.67, 0.22]], lerpSpeed: 0.01 },
+      bgColor:   { h: [0, 360, [1, 1, 1, 1, 1, 1, 1]], s: [0, 0,   [0.05, 0.3, 0.8, 1.0, 0.8, 0.3, 0.05]], l: [0, 0, [1, 1, 1, 1, 1, 1, 1]], intervalSec: [20, 60, [0.05, 0.3, 0.8, 1.0, 0.8, 0.3, 0.05]], lerpSpeed: 0.01 },
+      colorMode: 'Random',
+      trails:    true
+    };
+
+    // =========================================================================
+    // CONFIG: LIGHTSABER DUEL
+    // =========================================================================
+    const LIGHTSABER_CONFIG = {
+      speed:          { val: [50, 70, [0, 0.19, 0.64, 1, 0.63, 0.19, 0]], intervalSec: [10, 30, [0.05, 0.18, 0.48, 0.82, 0.95, 0.81, 0.44]], lerpSpeed: 0.01 },
+      backgroundFade: { val: [40, 80, [0, 0.05, 0.3, 1, 0.3, 0.05, 0]], intervalSec: [10, 30, [0.05, 0.3, 0.8, 1, 0.8, 0.3, 0.05]], lerpSpeed: 0.01 },
+      scaleX:         { val: [40, 60, [0, 0.05, 0.3, 1, 0.3, 0.05, 0]], intervalSec: [10, 30, [0.05, 0.3, 0.8, 1.0, 0.8, 0.3, 0.05]], lerpSpeed: 0.01 },
+      scaleY:         { val: [40, 60, [0, 0.05, 0.3, 1, 0.3, 0.05, 0]], intervalSec: [10, 30, [0.05, 0.3, 0.8, 1.0, 0.8, 0.3, 0.05]], lerpSpeed: 0.01 },
+      posX:           { val: [10, 90, [0, 0.05, 0.3, 1, 0.3, 0.05, 0]], intervalSec: [5, 20, [0.5, 0.92, 0.95, 0.7, 0.32, 0.13, 0.02]], lerpSpeed: 0.01 },
+      posY:           { val: [10, 90, [0, 0.05, 0.3, 1, 0.3, 0.05, 0]], intervalSec: [5, 20, [0.5, 0.92, 0.95, 0.7, 0.32, 0.13, 0.02]], lerpSpeed: 0.01 },
+      saber1:         { h: [0, 360, [1, 1, 1, 1, 1, 1, 1]], s: [80, 100, [0.05, 0.3, 0.8, 1.0, 0.8, 0.3, 0.05]], l: [45, 65, [0.05, 0.3, 0.8, 1.0, 0.8, 0.3, 0.05]], intervalSec: [10, 20, [0.05, 0.3, 0.8, 1.0, 0.8, 0.3, 0.05]], lerpSpeed: 0.01 },
+      saber2:         { h: [0, 360, [1, 1, 1, 1, 1, 1, 1]], s: [80, 100, [0.05, 0.3, 0.8, 1.0, 0.8, 0.3, 0.05]], l: [45, 65, [0.05, 0.3, 0.8, 1.0, 0.8, 0.3, 0.05]], intervalSec: [10, 20, [0.05, 0.3, 0.8, 1.0, 0.8, 0.3, 0.05]], lerpSpeed: 0.01 },
+      colorMode:      'Single Color',
+      swordStyle:     false,
+      hitFlash:       true
+    };
+
+    // =========================================================================
+    // CONFIG: TERMINAL
+    // =========================================================================
+    const TERMINAL_CONFIG = {
+      fontSize: { val: [5, 15, [0.04, 0.1, 0.42, 0.9, 1, 0.79, 0.13]], intervalSec: [10, 30, [0.11, 0.78, 0.93, 0.96, 0.62, 0.18, 0.05]], lerpSpeed: 0.02 },
+      color:    { h: [0, 360, [1, 1, 1, 1, 1, 1, 1]], s: [50, 100, [0.03, 0.07, 0.25, 0.55, 0.93, 0.92, 0.63]], l: [45, 60, [0.05, 0.3, 0.8, 1.0, 0.8, 0.3, 0.05]], intervalSec: [10, 30, [0.05, 0.3, 0.8, 1.0, 0.8, 0.3, 0.05]], lerpSpeed: 0.01 }
+    };
+
+    // =========================================================================
+    // CONFIG: SIDE TO SIDE
+    // =========================================================================
+    const SIDETOSIDE_CONFIG = {
+      speed: { val: [10, 70, [0.4, 0.87, 0.94, 0.55, 0.19, 0.06, 0.02]], intervalSec: [10, 30, [0.11, 0.47, 0.84, 1, 0.8, 0.25, 0.05]], lerpSpeed: 0.02 }
+    };
+
+
+  
+
+    // =========================================================================
+    // MATH UTILITIES & PROBABILITY CURVE ENGINE
+    // =========================================================================
+
+    // Расчет случайного числа по 7 точкам кривой (Метод обратной функции CDF)
+    function sampleCurve(min, max, points) {
+      if (!points || !Array.isArray(points) || points.length < 2) {
+        return min + Math.random() * (max - min);
+      }
+
+      // 1. Площади сегментов (интегрирование трапеций)
+      let cdf = [0];
+      let sum = 0;
+      for (let i = 0; i < points.length - 1; i++) {
+        let area = (points[i] + points[i + 1]) / 2;
+        sum += Math.max(0.0001, area);
+        cdf.push(sum);
+      }
+      for (let i = 0; i < cdf.length; i++) cdf[i] /= sum;
+
+      // 2. Бросок кубика и выбор точки на кривой
+      const r = Math.random();
+      for (let i = 0; i < cdf.length - 1; i++) {
+        if (r >= cdf[i] && r <= cdf[i + 1]) {
+          const t = (r - cdf[i]) / (cdf[i + 1] - cdf[i]);
+          const normX = (i + t) / (points.length - 1);
+          return min + normX * (max - min);
+        }
+      }
+      return min + 0.5 * (max - min);
+    }
+
+    // Вытягивание значения из тройки [min, max, [7 точек]]
+    function rollValue(tuple) {
+      if (!tuple || !Array.isArray(tuple)) return 0;
+      const min = tuple[0];
+      const max = tuple[1];
+      const curve = tuple[2];
+      return sampleCurve(min, max, curve);
+    }
+
+    // Стандартный Гаусс для таймеров смены эффекта
+    function randomGaussian(min, max) {
+      const factor = (Math.random() + Math.random() + Math.random()) / 3;
+      return min + factor * (max - min);
+    }
+
+    // Чтение интервала в минутах и перевод в секунды (* 60)
+    function getSwitchInterval() {
+      let minM = parseFloat(typeof minSwitchMin !== 'undefined' ? minSwitchMin : 15);
+      let maxM = parseFloat(typeof maxSwitchMin !== 'undefined' ? maxSwitchMin : 45);
+
+      if (isNaN(minM) || minM < 0.1) minM = 0.1;
+      if (isNaN(maxM) || maxM < 0.1) maxM = 45;
+      if (minM > maxM) maxM = minM;
+
+      return [minM * 60, maxM * 60];
+    }
+
+    // Проверка попадания в ночной диапазон по часам и минутам
+    function checkIsNight() {
+      const sh = (typeof sleepHour !== 'undefined') ? parseInt(sleepHour, 10) : 1;
+      const sm = (typeof sleepMinute !== 'undefined') ? parseInt(sleepMinute, 10) : 0;
+      const wh = (typeof wakeHour !== 'undefined') ? parseInt(wakeHour, 10) : 11;
+      const wm = (typeof wakeMinute !== 'undefined') ? parseInt(wakeMinute, 10) : 0;
+
+      const now = new Date();
+      const current = now.getHours() * 60 + now.getMinutes() + now.getSeconds() / 60;
+      const sleep = sh * 60 + sm;
+      const wake = wh * 60 + wm;
+
+      if (sleep < wake) {
+        return current >= sleep && current < wake;
+      } else {
+        return current >= sleep || current < wake;
+      }
+    }
+
+    // Нормировка радуги: каждому цвету ровно 1/6 (16.6%) круга
+    function normalizeRainbowHue(h) {
+      const anchors = [
+        [0, 0], [60, 45], [120, 70], [180, 170], [240, 255], [300, 295], [360, 360]
+      ];
+      for (let i = 0; i < anchors.length - 1; i++) {
+        const [inA, outA] = anchors[i];
+        const [inB, outB] = anchors[i + 1];
+        if (h >= inA && h <= inB) {
+          const t = (h - inA) / (inB - inA);
+          return outA + t * (outB - outA);
+        }
+      }
+      return h;
+    }
+
+    function randomWeighted(weightsMap) {
+      let total = 0;
+      for (let k in weightsMap) total += weightsMap[k];
+      let roll = Math.random() * total;
+      for (let k in weightsMap) {
+        if (roll < weightsMap[k]) return k;
+        roll -= weightsMap[k];
+      }
+      return Object.keys(weightsMap)[0];
+    }
+
+    function lerp(start, end, factor) {
+      return start + (end - start) * factor;
+    }
+
+    function lerpAngle(start, end, factor) {
+      let diff = (end - start) % 360;
+      if (diff > 180) diff -= 360;
+      if (diff < -180) diff += 360;
+      let res = (start + diff * factor) % 360;
+      return res < 0 ? res + 360 : res;
+    }
+
+    // =========================================================================
+    // PARAMETER CONTROLLERS
+    // =========================================================================
+    class RainbowParameterController {
+      constructor(config) {
+        this.cfg = config;
+        this.state = {};
+        this.timers = {};
+
+        ['size', 'fade', 'speed', 'cycleSpeed'].forEach(param => {
+          const c = this.cfg[param];
+          const initial = rollValue(c.val);
+          this.state[param] = { current: initial, target: initial, lerpSpeed: c.lerpSpeed, tuple: c.val };
+          this.scheduleNext(param, c.intervalSec);
+        });
+
+        this.state.colorMode = { current: randomWeighted(this.cfg.colorMode.weights) };
+        this.scheduleNext('colorMode', this.cfg.colorMode.intervalSec);
+      }
+
+      scheduleNext(param, tuple) {
+        const waitSec = rollValue(tuple);
+        this.timers[param] = Date.now() + (waitSec * 1000);
+      }
+
+      update() {
+        const now = Date.now();
+        ['size', 'fade', 'speed', 'cycleSpeed'].forEach(param => {
+          const item = this.state[param];
+          const c = this.cfg[param];
+          if (now >= this.timers[param]) {
+            item.target = rollValue(item.tuple);
+            this.scheduleNext(param, c.intervalSec);
+          }
+          item.current = lerp(item.current, item.target, item.lerpSpeed);
+        });
+
+        if (now >= this.timers.colorMode) {
+          this.state.colorMode.current = randomWeighted(this.cfg.colorMode.weights);
+          this.scheduleNext('colorMode', this.cfg.colorMode.intervalSec);
+        }
+      }
+
+      getValues() {
+        return {
+          size: this.state.size.current,
+          fade: this.state.fade.current,
+          speed: this.state.speed.current,
+          cycleSpeed: this.state.cycleSpeed.current,
+          colorMode: this.state.colorMode.current
+        };
+      }
+    }
+
+    class PastelParameterController {
+      constructor(config) {
+        this.cfg = config;
+        this.state = {};
+        this.timers = {};
+
+        ['sizeRaw', 'speedRaw'].forEach(param => {
+          const c = this.cfg[param];
+          const initial = rollValue(c.val);
+          this.state[param] = { current: initial, target: initial, lerpSpeed: c.lerpSpeed, tuple: c.val };
+          this.scheduleNext(param, c.intervalSec);
+        });
+
+        ['bgColor', 'color1', 'color2', 'color3', 'color4'].forEach(key => {
+          const c = this.cfg[key];
+          const h = rollValue(c.h);
+          const s = rollValue(c.s);
+          const l = rollValue(c.l);
+          this.state[key] = {
+            currentH: h, targetH: h, hTuple: c.h,
+            currentS: s, targetS: s, sTuple: c.s,
+            currentL: l, targetL: l, lTuple: c.l,
+            lerpSpeed: c.lerpSpeed
+          };
+          this.scheduleNext(key, c.intervalSec);
+        });
+      }
+
+      scheduleNext(param, tuple) {
+        const waitSec = rollValue(tuple);
+        this.timers[param] = Date.now() + (waitSec * 1000);
+      }
+
+      update() {
+        const now = Date.now();
+
+        ['sizeRaw', 'speedRaw'].forEach(param => {
+          const item = this.state[param];
+          const c = this.cfg[param];
+          if (now >= this.timers[param]) {
+            item.target = rollValue(item.tuple);
+            this.scheduleNext(param, c.intervalSec);
+          }
+          item.current = lerp(item.current, item.target, item.lerpSpeed);
+        });
+
+        ['bgColor', 'color1', 'color2', 'color3', 'color4'].forEach(key => {
+          const item = this.state[key];
+          const c = this.cfg[key];
+          if (now >= this.timers[key]) {
+            item.targetH = rollValue(item.hTuple);
+            item.targetS = rollValue(item.sTuple);
+            item.targetL = rollValue(item.lTuple);
+            this.scheduleNext(key, c.intervalSec);
+          }
+          item.currentH = lerpAngle(item.currentH, item.targetH, item.lerpSpeed);
+          item.currentS = lerp(item.currentS, item.targetS, item.lerpSpeed);
+          item.currentL = lerp(item.currentL, item.targetL, item.lerpSpeed);
+        });
+      }
+
+      getColor(key) {
+        const item = this.state[key];
+        const rawH = ((item.currentH % 360) + 360) % 360;
+        const finalH = normalizeRainbowHue(rawH);
+        return { h: finalH, s: item.currentS, l: item.currentL };
+      }
+
+      getValues() {
+        return {
+          sizeRaw: this.state.sizeRaw.current,
+          speedRaw: this.state.speedRaw.current,
+          bgColor: this.getColor('bgColor'),
+          colors: [
+            this.getColor('color1'),
+            this.getColor('color2'),
+            this.getColor('color3'),
+            this.getColor('color4')
+          ]
+        };
+      }
+    }
+
+    class VaporWaveParameterController {
+      constructor(config) {
+        this.cfg = config;
+        this.state = {};
+        this.timers = {};
+
+        ['barSpawn', 'effectSpeed', 'barWidth'].forEach(param => {
+          const c = this.cfg[param];
+          const initial = rollValue(c.val);
+          this.state[param] = { current: initial, target: initial, lerpSpeed: c.lerpSpeed, tuple: c.val };
+          this.scheduleNext(param, c.intervalSec);
+        });
+
+        ['lineColor', 'secondColor', 'tapBgColor'].forEach(key => {
+          const c = this.cfg[key];
+          const h = rollValue(c.h);
+          const s = rollValue(c.s);
+          const l = rollValue(c.l);
+          this.state[key] = {
+            currentH: h, targetH: h, hTuple: c.h,
+            currentS: s, targetS: s, sTuple: c.s,
+            currentL: l, targetL: l, lTuple: c.l,
+            lerpSpeed: c.lerpSpeed
+          };
+          this.scheduleNext(key, c.intervalSec);
+        });
+      }
+
+      scheduleNext(param, tuple) {
+        const waitSec = rollValue(tuple);
+        this.timers[param] = Date.now() + (waitSec * 1000);
+      }
+
+      rollFreshColor() {
+        const rawH = rollValue(this.state.lineColor.hTuple);
+        const h = normalizeRainbowHue(rawH);
+        const s = Math.round(rollValue(this.state.lineColor.sTuple));
+        const l = Math.round(rollValue(this.state.lineColor.lTuple));
+        return `hsl(${h}, ${s}%, ${l}%)`;
+      }
+
+      update() {
+        const now = Date.now();
+
+        ['barSpawn', 'effectSpeed', 'barWidth'].forEach(param => {
+          const item = this.state[param];
+          const c = this.cfg[param];
+          if (now >= this.timers[param]) {
+            item.target = rollValue(item.tuple);
+            this.scheduleNext(param, c.intervalSec);
+          }
+          item.current = lerp(item.current, item.target, item.lerpSpeed);
+        });
+
+        ['lineColor', 'secondColor', 'tapBgColor'].forEach(key => {
+          const item = this.state[key];
+          const c = this.cfg[key];
+          if (now >= this.timers[key]) {
+            item.targetH = rollValue(item.hTuple);
+            item.targetS = rollValue(item.sTuple);
+            item.targetL = rollValue(item.lTuple);
+            this.scheduleNext(key, c.intervalSec);
+          }
+          item.currentH = lerpAngle(item.currentH, item.targetH, item.lerpSpeed);
+          item.currentS = lerp(item.currentS, item.targetS, item.lerpSpeed);
+          item.currentL = lerp(item.currentL, item.targetL, item.lerpSpeed);
+        });
+      }
+
+      getColorHsl(key) {
+        const item = this.state[key];
+        const h = normalizeRainbowHue(((item.currentH % 360) + 360) % 360);
+        return { h: h, s: Math.round(item.currentS), l: Math.round(item.currentL) };
+      }
+
+      getValues() {
+        const lineHsl = this.getColorHsl('lineColor');
+        const secondHsl = this.getColorHsl('secondColor');
+        const tapBgHsl = this.getColorHsl('tapBgColor');
+
+        return {
+          barSpawn: this.state.barSpawn.current,
+          effectSpeed: this.state.effectSpeed.current,
+          barWidth: this.state.barWidth.current,
+          lineColorHsl: lineHsl,
+          secondColorHsl: secondHsl,
+          tapBgHsl: tapBgHsl,
+          secondColorStr: `hsl(${secondHsl.h}, ${secondHsl.s}%, ${secondHsl.l}%)`,
+          lineColorStr: `hsl(${lineHsl.h}, ${lineHsl.s}%, ${lineHsl.l}%)`,
+          randomColorLine: this.cfg.randomColorLine,
+          rollFreshColor: () => this.rollFreshColor()
+        };
+      }
+    }
+
+    class RadarParameterController {
+      constructor(config) {
+        this.cfg = config;
+        this.state = {};
+        this.timers = {};
+
+        ['blipSize', 'speed', 'trail'].forEach(param => {
+          const c = this.cfg[param];
+          const initial = rollValue(c.val);
+          this.state[param] = { current: initial, target: initial, lerpSpeed: c.lerpSpeed, tuple: c.val };
+          this.scheduleNext(param, c.intervalSec);
+        });
+
+        ['fgColor', 'bColor', 'rColor', 'bgColor'].forEach(key => {
+          const c = this.cfg[key];
+          const h = rollValue(c.h);
+          const s = rollValue(c.s);
+          const l = rollValue(c.l);
+          this.state[key] = {
+            currentH: h, targetH: h, hTuple: c.h,
+            currentS: s, targetS: s, sTuple: c.s,
+            currentL: l, targetL: l, lTuple: c.l,
+            lerpSpeed: c.lerpSpeed
+          };
+          this.scheduleNext(key, c.intervalSec);
+        });
+      }
+
+      scheduleNext(param, tuple) {
+        const waitSec = rollValue(tuple);
+        this.timers[param] = Date.now() + (waitSec * 1000);
+      }
+
+      update() {
+        const now = Date.now();
+
+        ['blipSize', 'speed', 'trail'].forEach(param => {
+          const item = this.state[param];
+          const c = this.cfg[param];
+          if (now >= this.timers[param]) {
+            item.target = rollValue(item.tuple);
+            this.scheduleNext(param, c.intervalSec);
+          }
+          item.current = lerp(item.current, item.target, item.lerpSpeed);
+        });
+
+        ['fgColor', 'bColor', 'rColor', 'bgColor'].forEach(key => {
+          const item = this.state[key];
+          const c = this.cfg[key];
+          if (now >= this.timers[key]) {
+            item.targetH = rollValue(item.hTuple);
+            item.targetS = rollValue(item.sTuple);
+            item.targetL = rollValue(item.lTuple);
+            this.scheduleNext(key, c.intervalSec);
+          }
+          item.currentH = lerpAngle(item.currentH, item.targetH, item.lerpSpeed);
+          item.currentS = lerp(item.currentS, item.targetS, item.lerpSpeed);
+          item.currentL = lerp(item.currentL, item.targetL, item.lerpSpeed);
+        });
+      }
+
+      getColorHsl(key) {
+        const item = this.state[key];
+        const h = normalizeRainbowHue(((item.currentH % 360) + 360) % 360);
+        return { h: h, s: Math.round(item.currentS), l: Math.round(item.currentL) };
+      }
+
+      getValues() {
+        return {
+          blipSize: this.state.blipSize.current,
+          speed: this.state.speed.current,
+          trail: this.state.trail.current,
+          fgColor: this.getColorHsl('fgColor'),
+          bColor: this.getColorHsl('bColor'),
+          rColor: this.getColorHsl('rColor'),
+          bgColor: this.getColorHsl('bgColor'),
+          rainbowMode: this.cfg.rainbowMode,
+          enableBlips: this.cfg.enableBlips,
+          enableRipples: this.cfg.enableRipples,
+          moveBlips: this.cfg.moveBlips
+        };
+      }
+    }
+
+    class RainParameterController {
+      constructor(config) {
+        this.cfg = config;
+        this.state = {};
+        this.timers = {};
+
+        ['speed', 'size'].forEach(param => {
+          const c = this.cfg[param];
+          const initial = rollValue(c.val);
+          this.state[param] = { current: initial, target: initial, lerpSpeed: c.lerpSpeed, tuple: c.val };
+          this.scheduleNext(param, c.intervalSec);
+        });
+
+        ['color', 'bgColor'].forEach(key => {
+          const c = this.cfg[key];
+          const h = rollValue(c.h);
+          const s = rollValue(c.s);
+          const l = rollValue(c.l);
+          this.state[key] = {
+            currentH: h, targetH: h, hTuple: c.h,
+            currentS: s, targetS: s, sTuple: c.s,
+            currentL: l, targetL: l, lTuple: c.l,
+            lerpSpeed: c.lerpSpeed
+          };
+          this.scheduleNext(key, c.intervalSec);
+        });
+      }
+
+      scheduleNext(param, tuple) {
+        const waitSec = rollValue(tuple);
+        this.timers[param] = Date.now() + (waitSec * 1000);
+      }
+
+      update() {
+        const now = Date.now();
+
+        ['speed', 'size'].forEach(param => {
+          const item = this.state[param];
+          const c = this.cfg[param];
+          if (now >= this.timers[param]) {
+            item.target = rollValue(item.tuple);
+            this.scheduleNext(param, c.intervalSec);
+          }
+          item.current = lerp(item.current, item.target, item.lerpSpeed);
+        });
+
+        ['color', 'bgColor'].forEach(key => {
+          const item = this.state[key];
+          const c = this.cfg[key];
+          if (now >= this.timers[key]) {
+            item.targetH = rollValue(item.hTuple);
+            item.targetS = rollValue(item.sTuple);
+            item.targetL = rollValue(item.lTuple);
+            this.scheduleNext(key, c.intervalSec);
+          }
+          item.currentH = lerpAngle(item.currentH, item.targetH, item.lerpSpeed);
+          item.currentS = lerp(item.currentS, item.targetS, item.lerpSpeed);
+          item.currentL = lerp(item.currentL, item.targetL, item.lerpSpeed);
+        });
+      }
+
+      getColorHsl(key) {
+        const item = this.state[key];
+        const h = normalizeRainbowHue(((item.currentH % 360) + 360) % 360);
+        return { h: h, s: Math.round(item.currentS), l: Math.round(item.currentL) };
+      }
+
+      getValues() {
+        const col = this.getColorHsl('color');
+        const bg = this.getColorHsl('bgColor');
+
+        return {
+          speed: this.state.speed.current,
+          size: this.state.size.current,
+          colorHsl: col,
+          bgColorHsl: bg,
+          colorStr: `hsl(${col.h}, ${col.s}%, ${col.l}%)`,
+          bgColorStr: `hsl(${bg.h}, ${bg.s}%, ${bg.l}%)`,
+          colorMode: this.cfg.colorMode,
+          trails: this.cfg.trails
+        };
+      }
+    }
+
+    class LightsaberParameterController {
+      constructor(config) {
+        this.cfg = config;
+        this.state = {};
+        this.timers = {};
+        this.isColorFrozen = false; // Блокировка цвета во время удара
+
+        ['speed', 'backgroundFade', 'scaleX', 'scaleY', 'posX', 'posY'].forEach(param => {
+          const c = this.cfg[param];
+          const initial = rollValue(c.val);
+          this.state[param] = { current: initial, target: initial, lerpSpeed: c.lerpSpeed, tuple: c.val };
+          this.scheduleNext(param, c.intervalSec);
+        });
+
+        ['saber1', 'saber2'].forEach(key => {
+          const c = this.cfg[key];
+          const h = rollValue(c.h);
+          const s = rollValue(c.s);
+          const l = rollValue(c.l);
+          this.state[key] = {
+            currentH: h, targetH: h, hTuple: c.h,
+            currentS: s, targetS: s, sTuple: c.s,
+            currentL: l, targetL: l, lTuple: c.l,
+            lerpSpeed: c.lerpSpeed
+          };
+          this.scheduleNext(key, c.intervalSec);
+        });
+      }
+
+      scheduleNext(param, tuple) {
+        const waitSec = rollValue(tuple);
+        this.timers[param] = Date.now() + (waitSec * 1000);
+      }
+
+      setHitLock(locked) {
+        this.isColorFrozen = locked;
+      }
+
+      update() {
+        const now = Date.now();
+
+        // 1. Физические свойства двигаются всегда плавно
+        ['speed', 'backgroundFade', 'scaleX', 'scaleY', 'posX', 'posY'].forEach(param => {
+          const item = this.state[param];
+          const c = this.cfg[param];
+          if (now >= this.timers[param]) {
+            item.target = rollValue(item.tuple);
+            this.scheduleNext(param, c.intervalSec);
+          }
+          item.current = lerp(item.current, item.target, item.lerpSpeed);
+        });
+
+        // 2. Цвета обновляются ТОЛЬКО когда мечи не в блоке удара
+        ['saber1', 'saber2'].forEach(key => {
+          const item = this.state[key];
+          const c = this.cfg[key];
+
+          if (now >= this.timers[key]) {
+            if (!this.isColorFrozen) {
+              item.targetH = rollValue(item.hTuple);
+              item.targetS = rollValue(item.sTuple);
+              item.targetL = rollValue(item.lTuple);
+              this.scheduleNext(key, c.intervalSec);
+            }
+          }
+
+          // Если цвет не заморожен ударом — интерполируем к цели
+          if (!this.isColorFrozen) {
+            item.currentH = lerpAngle(item.currentH, item.targetH, item.lerpSpeed);
+            item.currentS = lerp(item.currentS, item.targetS, item.lerpSpeed);
+            item.currentL = lerp(item.currentL, item.targetL, item.lerpSpeed);
+          }
+        });
+      }
+
+      getColor(key) {
+        const item = this.state[key];
+        const rawH = ((item.currentH % 360) + 360) % 360;
+        const finalH = normalizeRainbowHue(rawH);
+        return { h: finalH, s: item.currentS, l: item.currentL };
+      }
+
+      getValues() {
+        return {
+          speed: this.state.speed.current,
+          backgroundFade: this.state.backgroundFade.current,
+          scaleX: this.state.scaleX.current,
+          scaleY: this.state.scaleY.current,
+          posX: this.state.posX.current,
+          posY: this.state.posY.current,
+          saber1: this.getColor('saber1'),
+          saber2: this.getColor('saber2'),
+          colorMode: this.cfg.colorMode,
+          swordStyle: this.cfg.swordStyle,
+          hitFlash: this.cfg.hitFlash
+        };
+      }
+    }
+
+    class TerminalParameterController {
+      constructor(config) {
+        this.cfg = config;
+        this.state = {};
+        this.timers = {};
+
+        const fCfg = this.cfg.fontSize;
+        const initSize = rollValue(fCfg.val);
+        this.state.fontSize = { current: initSize, target: initSize, lerpSpeed: fCfg.lerpSpeed, tuple: fCfg.val };
+        this.scheduleNext('fontSize', fCfg.intervalSec);
+
+        const cCfg = this.cfg.color;
+        const h = rollValue(cCfg.h);
+        const s = rollValue(cCfg.s);
+        const l = rollValue(cCfg.l);
+        this.state.color = {
+          currentH: h, targetH: h, hTuple: cCfg.h,
+          currentS: s, targetS: s, sTuple: cCfg.s,
+          currentL: l, targetL: l, lTuple: cCfg.l,
+          lerpSpeed: cCfg.lerpSpeed
+        };
+        this.scheduleNext('color', cCfg.intervalSec);
+      }
+
+      scheduleNext(param, tuple) {
+        const waitSec = rollValue(tuple);
+        this.timers[param] = Date.now() + (waitSec * 1000);
+      }
+
+      update() {
+        const now = Date.now();
+
+        // Размер шрифта
+        const fItem = this.state.fontSize;
+        if (now >= this.timers.fontSize) {
+          fItem.target = rollValue(fItem.tuple);
+          this.scheduleNext('fontSize', this.cfg.fontSize.intervalSec);
+        }
+        fItem.current = lerp(fItem.current, fItem.target, fItem.lerpSpeed);
+
+        // Цвет
+        const cItem = this.state.color;
+        if (now >= this.timers.color) {
+          cItem.targetH = rollValue(cItem.hTuple);
+          cItem.targetS = rollValue(cItem.sTuple);
+          cItem.targetL = rollValue(cItem.lTuple);
+          this.scheduleNext('color', this.cfg.color.intervalSec);
+        }
+        cItem.currentH = lerpAngle(cItem.currentH, cItem.targetH, cItem.lerpSpeed);
+        cItem.currentS = lerp(cItem.currentS, cItem.targetS, cItem.lerpSpeed);
+        cItem.currentL = lerp(cItem.currentL, cItem.targetL, cItem.lerpSpeed);
+      }
+
+      getColor() {
+        const item = this.state.color;
+        const rawH = ((item.currentH % 360) + 360) % 360;
+        const finalH = normalizeRainbowHue(rawH);
+        return { h: finalH, s: item.currentS, l: item.currentL };
+      }
+
+      getValues() {
+        return {
+          fontSize: this.state.fontSize.current, // Передаем плавное дробное число вместо Math.round
+          color: this.getColor()
+        };
+      }
+    }
+
+    class SideToSideParameterController {
+      constructor(config) {
+        this.cfg = config;
+        this.state = {};
+        this.timers = {};
+
+        const sCfg = this.cfg.speed;
+        const initSpeed = rollValue(sCfg.val);
+        this.state.speed = { current: initSpeed, target: initSpeed, lerpSpeed: sCfg.lerpSpeed, tuple: sCfg.val };
+        this.scheduleNext('speed', sCfg.intervalSec);
+      }
+
+      scheduleNext(param, tuple) {
+        const waitSec = rollValue(tuple);
+        this.timers[param] = Date.now() + (waitSec * 1000);
+      }
+
+      update() {
+        const now = Date.now();
+        const sItem = this.state.speed;
+        if (now >= this.timers.speed) {
+          sItem.target = rollValue(sItem.tuple);
+          this.scheduleNext('speed', this.cfg.speed.intervalSec);
+        }
+        sItem.current = lerp(sItem.current, sItem.target, sItem.lerpSpeed);
+      }
+
+      getValues() {
+        return {
+          speed: this.state.speed.current
+        };
+      }
+    }
+
+
+
+    // =========================================================================
+    // MODULE: RAINBOW DATA
+    // =========================================================================
+    class RainbowDataEffect {
+      constructor(canvas, ctx) {
+        this.canvas = canvas;
+        this.ctx = ctx;
+        this.effects = [];
+        this.empDelay = 0;
+        this.frontCycle = 0;
+        this.isExiting = false;
+
+        this.proBack = [0, 0, 0];
+        this.proPix = [80, 100, 50];
+        this.proEmp = [198, 100, 44];
+
+        this._clickHandler = (e) => {
+          if (this.isExiting) return;
+          const rect = this.canvas.getBoundingClientRect();
+          const x = (e.clientX - rect.left) * (320 / rect.width);
+          const y = (e.clientY - rect.top) * (200 / rect.height);
+          this.onCanvasTapped(x, y);
+        };
+        this.canvas.addEventListener('click', this._clickHandler);
+      }
+
+      init() {
+        this.effects = [];
+        this.empDelay = 0;
+        this.frontCycle = 0;
+        this.isExiting = false;
+      }
+
+      startExit() {
+        this.isExiting = true;
+      }
+
+      isFinished() {
+        return this.effects.length === 0;
+      }
+
+      update(params) {
+        // Если эффект уходит — он не перекрывает фон нового эффекта, а только рисует свои частицы!
+        if (!this.isExiting) {
+          this.ctx.fillStyle = `hsla(0, 0%, 0%, ${params.fade ? 0.5 - params.fade / 200 : 1})`;
+          this.ctx.fillRect(0, 0, 320, 200);
+        }
+
+        if (params.colorMode === "Color Cycle") {
+          this.frontCycle < 360 ? this.frontCycle += params.cycleSpeed / 50 : this.frontCycle %= 360;
+        } else {
+          this.frontCycle = 0;
+        }
+
+        if (!this.isExiting && this.effects.length < 100) {
+          if (this.empDelay > 0) this.empDelay--;
+          else this.effects.push(this.createParticle(params));
+        }
+
+        for (let i = this.effects.length - 1; i >= 0; i--) {
+          const ele = this.effects[i];
+          ele.draw();
+          if (ele.lifetime <= 0) this.effects.splice(i, 1);
+        }
+      }
+
+      createParticle(params) {
+        const self = this;
+        const tempMod = Math.random();
+        return {
+          x: Math.random() * 320 - params.size / 2,
+          y: -params.size - 60,
+          rot: tempMod < 0.25 ? 0 : tempMod < 0.5 ? Math.PI / 2 : tempMod < 0.75 ? Math.PI : Math.PI * 1.5,
+          mod: params.colorMode === "Random" ? Math.random() * 360 : 0,
+          mod2: 0,
+          lifetime: 1,
+          draw: function() {
+            if (params.colorMode === "Rainbow Gradient") this.mod2 = (this.x + this.y);
+            const col = `hsla(${self.proPix[0] + self.frontCycle + this.mod + this.mod2}, ${self.proPix[1]}%, ${self.proPix[2]}%, 1)`;
+
+            self.ctx.save();
+            self.ctx.translate(160, 100);
+            self.ctx.rotate(this.rot);
+            self.ctx.translate(-160, -100);
+            self.ctx.fillStyle = col;
+            self.ctx.fillRect(this.x, this.y, params.size, params.size);
+            self.ctx.restore();
+
+            if (this.y < 320) this.y += params.speed / 10;
+            else this.lifetime = 0;
+          }
+        };
+      }
+
+      onCanvasTapped(x, y) {
+        const self = this;
+        this.effects = [];
+        this.effects.push({
+          rad: 1, x: x, y: y, lifetime: 1,
+          draw: function() {
+            self.ctx.beginPath();
+            self.ctx.strokeStyle = `hsla(${self.proEmp[0] + self.frontCycle}, ${self.proEmp[1]}%, ${self.proEmp[2]}%, .5)`;
+            self.ctx.lineWidth = 20;
+            self.ctx.arc(this.x, this.y, this.rad, 0, 2 * Math.PI);
+            self.ctx.stroke();
+            if (this.rad < 300) this.rad += 10;
+            else this.lifetime = 0;
+          }
+        });
+        this.empDelay = 60;
+      }
+
+      destroy() {
+        this.effects = [];
+        this.canvas.removeEventListener('click', this._clickHandler);
+      }
+    }
+
+    // =========================================================================
+    // MODULE: PASTEL DREAM
+    // =========================================================================
+    class PastelDreamEffect {
+      constructor(canvas, ctx) {
+        this.canvas = canvas;
+        this.ctx = ctx;
+        this.width = 320;
+        this.height = 200;
+        this.effects = [];
+        this.isExiting = false;
+      }
+
+      init() {
+        // Стартуем пустыми: никаких кругов в центре!
+        this.effects = [];
+        this.isExiting = false;
+      }
+
+      startExit() {
+        this.isExiting = true;
+      }
+
+      isFinished() {
+        return this.effects.length === 0;
+      }
+
+      update(params) {
+        // Отрисовка фона
+        if (!this.isExiting) {
+          const bg = params.bgColor;
+          this.ctx.fillStyle = `hsla(${bg.h}, ${bg.s}%, ${bg.l}%, 0.13)`;
+          this.ctx.fillRect(0, 0, this.width, this.height);
+        }
+
+        // Оригинальный плотный спавн (22 круга в кадр, строго с верхнего y=0 и нижнего y=200 краев)
+        if (!this.isExiting && this.effects.length < 500) {
+          for (let k = 0; k < 11; k++) {
+            this.effects.push(this.createSquare());
+            this.effects.push(this.createUpSquare());
+          }
+        }
+
+        // Оригинальная отрисовка
+        for (let i = 0; i < this.effects.length; i++) {
+          this.effects[i].Draw(this.ctx, params);
+        }
+
+        // Оригинальная очистка вылетевших
+        for (let j = this.effects.length - 1; j >= 0; j--) {
+          if (this.effects[j].IsFinished()) {
+            this.effects.splice(j, 1);
+          }
+        }
+      }
+
+      // Оригинальный Square (вылетает строго с верхнего края y = 0)
+      createSquare() {
+        return {
+          x: Math.random() * 320,
+          y: 0,
+          speedX: Math.random() * (Math.ceil(Math.random() * 1) * (Math.round(Math.random()) ? 1 : -1)),
+          speedY: Math.random() * 2 + 0.5,
+          size: Math.round(Math.random() * 10) + 1,
+          radius: 1,
+          ssi: Math.floor(Math.random() * 4),
+          maxSize: Math.random() * 10 + 5,
+          alpha: Math.random() * 0.7 + 0.3,
+          Draw: function(ctx, params) {
+            const c = params.colors[this.ssi];
+            ctx.fillStyle = `hsla(${c.h}, ${c.s}%, ${c.l}%, ${this.alpha})`;
+            ctx.lineWidth = this.size;
+            ctx.beginPath();
+            ctx.arc(this.x, this.y, this.maxSize * (params.sizeRaw / 50), 0, 2 * Math.PI);
+            ctx.fill();
+            this.x += this.speedX * (params.speedRaw / 50);
+            this.y += this.speedY * (params.speedRaw / 50);
+            if (this.radius < this.maxSize) this.radius += 0.2;
+          },
+          IsFinished: function() { return this.y > 210; }
+        };
+      }
+
+      // Оригинальный UpSquare (вылетает строго с нижнего края y = 200)
+      createUpSquare() {
+        return {
+          x: Math.random() * 320,
+          y: 200,
+          speedX: Math.random() * (Math.ceil(Math.random() * 1) * (Math.round(Math.random()) ? 1 : -1)),
+          speedY: Math.random() * 2 + 0.5,
+          size: Math.round(Math.random() * 10) + 1,
+          radius: 1,
+          ssi: Math.floor(Math.random() * 4),
+          maxSize: Math.random() * 10 + 5,
+          alpha: Math.random() * 0.7 + 0.3,
+          Draw: function(ctx, params) {
+            const c = params.colors[this.ssi];
+            ctx.fillStyle = `hsla(${c.h}, ${c.s}%, ${c.l}%, ${this.alpha})`;
+            ctx.lineWidth = this.size;
+            ctx.beginPath();
+            ctx.arc(this.x, this.y, this.maxSize * (params.sizeRaw / 50), 0, 2 * Math.PI);
+            ctx.fill();
+            this.x += this.speedX * (params.speedRaw / 50);
+            this.y -= this.speedY * (params.speedRaw / 50);
+            if (this.radius < this.maxSize) this.radius += 0.2;
+          },
+          IsFinished: function() { return this.y < 0; }
+        };
+      }
+
+      destroy() {
+        this.effects = [];
+      }
+    }
+
+    // =========================================================================
+    // MODULE: VAPOR WAVE
+    // =========================================================================
+    class VaporWaveEffect {
+      constructor(canvas, ctx) {
+        this.canvas = canvas;
+        this.ctx = ctx;
+        this.width = 320;
+        this.height = 200;
+        this.cubes = [];
+        this.tapCubes = [];
+        this.tappedAlpha = 0;
+        this.tappedCounter = 0;
+        this.isExiting = false;
+        this.activeTimeouts = [];
+
+        this._clickHandler = (e) => {
+          if (this.isExiting) return;
+          const rect = this.canvas.getBoundingClientRect();
+          const x = (e.clientX - rect.left) * (320 / rect.width);
+          const y = (e.clientY - rect.top) * (200 / rect.height);
+          this.onCanvasTapped(x, y);
+        };
+        this.canvas.addEventListener('click', this._clickHandler);
+      }
+
+      init() {
+        this.cubes = [];
+        this.tapCubes = [];
+        this.tappedAlpha = 0;
+        this.tappedCounter = 0;
+        this.isExiting = false;
+      }
+
+      startExit() {
+        this.isExiting = true;
+      }
+
+      isFinished() {
+        return this.cubes.length === 0 && this.tapCubes.length === 0;
+      }
+
+      update(params) {
+        // Отрисовка фона secondColor (черный по конфигу)
+        if (!this.isExiting) {
+          this.ctx.fillStyle = params.secondColorStr;
+          this.ctx.fillRect(0, 0, this.width, this.height);
+        }
+
+        // Спавн новых полос
+        if (!this.isExiting && Math.random() > 1 - (params.barSpawn / 100)) {
+          const xOry = Math.random() > 0.5;
+          const direction = Math.random() > 0.5;
+          const begin = { x: xOry ? (direction ? -250 : 700) : -150, y: xOry ? -150 : (direction ? -250 : 350) };
+          const end = { x: xOry ? (direction ? 500 : -150) : -150, y: xOry ? -150 : (direction ? 350 : -150) };
+
+          const barCol = params.randomColorLine ? params.rollFreshColor() : params.lineColorStr;
+          this.cubes.push(this.createStripe(xOry, begin, end, 600, params.barWidth * 4, params.effectSpeed, barCol, params.secondColorHsl));
+        }
+
+        // Полет полос
+        for (let i = this.cubes.length - 1; i >= 0; i--) {
+          const cube = this.cubes[i];
+          cube.draw(this.ctx);
+          if (cube.lifetime <= 0) {
+            this.cubes.splice(i, 1);
+          }
+        }
+
+        // Отрисовка фона и кругов при тапе (tapBgColor)
+        if (Date.now() > this.tappedCounter) {
+          this.tappedAlpha -= 0.01;
+        }
+
+        if (this.tappedAlpha > 0 && !this.isExiting) {
+          const bg = params.tapBgHsl;
+          this.ctx.fillStyle = `hsla(${bg.h}, ${bg.s}%, ${bg.l}%, ${Math.max(0, this.tappedAlpha)})`;
+          this.ctx.fillRect(0, 0, this.width, this.height);
+        }
+
+        for (let i = this.tapCubes.length - 1; i >= 0; i--) {
+          const tc = this.tapCubes[i];
+          if (this.tappedAlpha > 0) {
+            tc.draw(this.ctx);
+          }
+          if (tc.lifetime <= 0) {
+            this.tapCubes.splice(i, 1);
+          }
+        }
+      }
+
+      createStripe(xOry, beginPoint, endPoint, width, height, speed, color, secondColorHsl) {
+        const randRotation = Math.random() > 0.5;
+        const noRot = Math.random() > 0.8;
+        let cubeRot = 0;
+
+        if (xOry) {
+          cubeRot = randRotation ? 45 : 135;
+        } else {
+          if (randRotation) cubeRot = 25;
+          else if (!noRot) cubeRot = -25;
+          else cubeRot = 0;
+        }
+
+        const rot = Math.atan2(endPoint.y - beginPoint.y, endPoint.x - beginPoint.x);
+
+        return {
+          x: beginPoint.x,
+          y: beginPoint.y,
+          width: width,
+          height: height,
+          speed: speed,
+          color: color,
+          rot: rot,
+          cubeRot: cubeRot,
+          start: Date.now(),
+          duration: 15000,
+          lifetime: 1,
+          draw: function(ctx) {
+            ctx.save();
+            ctx.translate(this.x, this.y);
+            ctx.rotate(this.cubeRot * (Math.PI / 180));
+
+            // Градиент полосы растворяется в secondColor
+            const gradient = ctx.createLinearGradient(0, 0, 0, this.height);
+            gradient.addColorStop(0, `hsla(${secondColorHsl.h}, ${secondColorHsl.s}%, ${secondColorHsl.l}%, 0)`);
+            gradient.addColorStop(0.5, this.color);
+            gradient.addColorStop(1, `hsla(${secondColorHsl.h}, ${secondColorHsl.s}%, ${secondColorHsl.l}%, 0)`);
+
+            ctx.fillStyle = gradient;
+            ctx.fillRect(0, 0, this.width, this.height);
+            ctx.restore();
+
+            this.x += this.speed * Math.cos(this.rot);
+            this.y += this.speed * Math.sin(this.rot);
+
+            if (Date.now() - this.start > this.duration) {
+              this.lifetime = 0;
+            }
+          }
+        };
+      }
+
+      onCanvasTapped(x, y) {
+        this.tappedAlpha = Math.min(Math.max(this.tappedAlpha + 0.2, 0), 1);
+        this.tappedCounter = Date.now() + 1500;
+        this.tapCubes.push(this.createRipple(x, y, 4, 3000, 30, '#ff06f4'));
+        const tid = setTimeout(() => {
+          if (!this.isExiting) {
+            this.tapCubes.push(this.createRipple(x, y, 4, 3000, 10, '#00c5ff'));
+          }
+        }, 100);
+        this.activeTimeouts.push(tid);
+      }
+
+      createRipple(x, y, speed, duration, rippleWidth, color) {
+        return {
+          x: x, y: y, speed: speed, dur: duration, width: rippleWidth, col: color,
+          start: Date.now(), radius: 0, lifetime: 1,
+          draw: function(ctx) {
+            ctx.lineWidth = this.width;
+            ctx.strokeStyle = this.col;
+            ctx.beginPath();
+            ctx.arc(this.x, this.y, this.radius, 0, 2 * Math.PI);
+            ctx.stroke();
+            this.radius += this.speed;
+            this.lifetime = this.dur - (Date.now() - this.start);
+          }
+        };
+      }
+
+      destroy() {
+        // Убиваем все повисшие таймеры с проверкой на существование массива
+        if (this.activeTimeouts && Array.isArray(this.activeTimeouts)) {
+          this.activeTimeouts.forEach(tid => clearTimeout(tid));
+        }
+        this.activeTimeouts = [];
+        this.cubes = [];
+        this.tapCubes = [];
+        this.canvas.removeEventListener('click', this._clickHandler);
+      }
+    }
+
+    // =========================================================================
+    // MODULE: RADAR (ORIGINAL ENGINE)
+    // =========================================================================
+    class RadarEffect {
+      constructor(canvas, ctx) {
+        this.canvas = canvas;
+        this.ctx = ctx;
+        this.width = 320;
+        this.height = 200;
+
+        this.deg = 0;
+        this.radians = 0;
+        this.blips = [];
+        this.rippleTiming = 0;
+        this.isExiting = false;
+        this.activeTimeouts = []
+
+        this.beamLength = 0;
+        this.centerAlpha = 0.0;
+        this.isFullyActive = false;
+      }
+
+      init() {
+        this.deg = 0;
+        this.radians = 0;
+        this.blips = [];
+        this.rippleTiming = 0;
+        this.isExiting = false;
+
+        this.beamLength = 0;
+        this.centerAlpha = 0.0;
+        this.isFullyActive = false;
+      }
+
+      startExit() {
+        this.isExiting = true;
+        this.blips = [];
+        this.rippleTiming = 0;
+      }
+
+      isFinished() {
+        return this.beamLength <= 0 && this.centerAlpha <= 0;
+      }
+
+      update(params) {
+        // 1. Анимация появления и ухода антенны
+        if (!this.isExiting) {
+          if (this.centerAlpha < 1.0) this.centerAlpha += 0.05;
+
+          if (this.beamLength < 200) {
+            this.beamLength += 3.3;
+            if (this.beamLength >= 200) {
+              this.beamLength = 200;
+              this.isFullyActive = true;
+            }
+          }
+        } else {
+          if (this.beamLength > 0) {
+            this.beamLength = Math.max(0, this.beamLength - 3.3);
+          } else {
+            if (this.centerAlpha > 0) {
+              this.centerAlpha = Math.max(0, this.centerAlpha - 0.05);
+            }
+          }
+        }
+
+        // 2. Фон со шлейфом
+        if (!this.isExiting) {
+          const bg = params.bgColor;
+          const alpha = (100 - params.trail) / 100;
+          this.ctx.fillStyle = `hsla(${bg.h}, ${bg.s}%, ${bg.l}%, ${alpha})`;
+          this.ctx.fillRect(0, 0, this.width, this.height);
+        }
+
+        // 3. Пульсация сонара (оригинальный код)
+        if (this.isFullyActive && !this.isExiting && params.enableRipples) {
+          if (this.rippleTiming < 750) {
+            this.rippleTiming += params.speed / 10;
+          } else {
+            this.rippleTiming = 1;
+          }
+          const rc = params.rColor;
+          this.ctx.strokeStyle = `hsl(${rc.h}, ${rc.s}%, ${rc.l}%)`;
+          this.ctx.beginPath();
+          this.ctx.arc(160, 100, this.rippleTiming, 0, 2 * Math.PI);
+          this.ctx.stroke();
+        }
+
+        // 4. Отрисовка центральной точки и луча антенны
+        if (this.centerAlpha > 0) {
+          const fc = params.fgColor;
+          const fgStyle = `hsla(${fc.h}, ${fc.s}%, ${fc.l}%, ${this.centerAlpha})`;
+          this.ctx.strokeStyle = fgStyle;
+          this.ctx.fillStyle = fgStyle;
+
+          // Точка ядра
+          this.ctx.beginPath();
+          this.ctx.arc(160, 100, 5, 0, 2 * Math.PI);
+          this.ctx.fill();
+
+          // Луч антенны
+          if (this.beamLength > 0) {
+            this.ctx.lineWidth = 10;
+            this.ctx.beginPath();
+            this.ctx.moveTo(160, 100);
+            this.radians = this.deg * (Math.PI / 180);
+            this.ctx.lineTo(
+              160 + Math.cos(this.radians) * this.beamLength,
+              100 + Math.sin(this.radians) * this.beamLength
+            );
+            this.ctx.stroke();
+          }
+        }
+
+        // 5. Спавн засечек
+        if (this.isFullyActive && !this.isExiting) {
+          if (Math.round(Math.random() * Math.max(1, (30 - params.speed / 10))) === 5 && this.blips.length < 5) {
+            if (params.speed > 0) {
+              this.blips.push(this.createBlip(this.radians, params));
+            }
+          }
+        }
+
+        // 6. Вращение
+        if (this.deg < 360) {
+          this.deg += params.speed / 10;
+        } else {
+          this.deg = 0;
+        }
+
+        // 7. Отрисовка засечек
+        if (params.enableBlips && !this.isExiting) {
+          for (let i = this.blips.length - 1; i >= 0; i--) {
+            const b = this.blips[i];
+            b.draw(this.ctx, params);
+            b.update(this.radians, params);
+            if (b.lifetime <= 0) {
+              this.blips.splice(i, 1);
+            }
+          }
+        }
+      }
+
+      createBlip(inRads, params) {
+        return {
+          radians: inRads,
+          offset: Math.round(Math.random() * 360),
+          rad: Math.random() * 50 + 50,
+          dir: Math.round(Math.random() * 2),
+          alpha: 1.0,
+          lifetime: Math.random() * 20 + 20,
+          x: 0,
+          y: 0,
+          draw: function(ctx, p) {
+            const bc = p.bColor;
+            ctx.fillStyle = `hsla(${bc.h}, ${bc.s}%, ${bc.l}%, ${this.alpha})`;
+            ctx.beginPath();
+            ctx.arc(this.x, this.y, p.blipSize, 0, 2 * Math.PI);
+            ctx.fill();
+          },
+          update: function(scanRads, p) {
+            const thisDeg = Math.round(this.radians * (180 / Math.PI));
+            const scanDeg = Math.round(scanRads * (180 / Math.PI));
+
+            if (this.alpha - 0.03 > 0.1) {
+              this.alpha -= 0.03;
+            } else {
+              this.alpha = 0.1;
+            }
+
+            if (Math.abs(scanDeg - thisDeg) < 10) {
+              this.lifetime--;
+              this.alpha = 1.0;
+              if (p.moveBlips) {
+                if (this.dir === 1) this.rad -= p.speed / 10;
+                else this.rad += p.speed / 10;
+              }
+            }
+
+            this.x = 160 + Math.cos(this.radians) * this.rad;
+            this.y = 100 + Math.sin(this.radians) * this.rad;
+          }
+        };
+      }
+
+      destroy() {
+        if (this.activeTimeouts && this.activeTimeouts.length > 0) {
+          this.activeTimeouts.forEach(tid => clearTimeout(tid));
+          this.activeTimeouts = [];
+        }
+        this.blips = [];
+      }
+    }
+
+    // =========================================================================
+    // MODULE: RAIN (ОРГАНИЧЕСКИЙ ВХОД И ВЫХОД КАПЕЛЬ)
+    // =========================================================================
+    class RainEffect {
+      constructor(canvas, ctx) {
+        this.canvas = canvas;
+        this.ctx = ctx;
+        this.width = 320;
+        this.height = 200;
+        this.droplets = [];
+        this.isExiting = false;
+      }
+
+      init() {
+        this.droplets = [];
+        this.isExiting = false;
+      }
+
+      startExit() {
+        this.isExiting = true; // Перестаем спавнить новые капли
+      }
+
+      isFinished() {
+        // Завершено, когда все капли и их хвосты упали за пределы экрана
+        return this.droplets.length === 0;
+      }
+
+      update(params) {
+        // Отрисовка динамического фона
+        if (!this.isExiting) {
+          this.ctx.fillStyle = params.bgColorStr;
+          this.ctx.fillRect(0, 0, this.width, this.height);
+        }
+
+        // Спавн капель
+        if (!this.isExiting && this.droplets.length < 50) {
+          const bAddNew = Math.floor(Math.random() * 4) === 3;
+          if (bAddNew) {
+            this.droplets.push(this.createDroplet(params));
+          }
+        }
+
+        // Отрисовка и полет капель
+        for (let i = this.droplets.length - 1; i >= 0; i--) {
+          const drop = this.droplets[i];
+          drop.draw(this.ctx, params);
+          if (drop.isFinished()) {
+            this.droplets.splice(i, 1);
+          }
+        }
+      }
+
+      createDroplet() {
+        return {
+          x: Math.random() * 320,
+          y: -15,
+          rnd: Math.random(),
+          color: normalizeRainbowHue(Math.random() * 360),
+          pos: [],
+          draw: function(ctx, p) {
+            if (p.speed > 0) {
+              this.y += (p.speed / 10) * this.rnd + 0.3;
+            }
+
+            if (p.trails) {
+              // Пул координат: переиспользуем ячейку вместо создания нового массива в куче
+              if (this.pos.length < 15) {
+                this.pos.push({ x: this.x, y: this.y });
+              } else {
+                const recycled = this.pos.shift();
+                recycled.x = this.x;
+                recycled.y = this.y;
+                this.pos.push(recycled);
+              }
+
+              for (let j = 0; j < this.pos.length; j++) {
+                const opacity = j / this.pos.length;
+                ctx.fillStyle = `hsla(${this.color}, 100%, 50%, ${opacity})`;
+                ctx.fillRect(this.pos[j].x, this.pos[j].y, p.size, p.size);
+              }
+            } else {
+              ctx.fillStyle = `hsl(${this.color}, 100%, 50%)`;
+              ctx.fillRect(this.x, this.y, p.size, p.size);
+            }
+          },
+          isFinished: function() {
+            return this.y > 230;
+          }
+        };
+      }
+
+      destroy() {
+        for (let i = 0; i < this.droplets.length; i++) {
+          this.droplets[i].pos = [];
+        }
+        this.droplets = [];
+      }
+    }
+
+    // =========================================================================
+    // MODULE: LIGHTSABER DUEL (CLEAN & SYNCHRONIZED TRANSITIONS)
+    // =========================================================================
+    class LightsaberDuelEffect {
+      constructor(canvas, ctx) {
+        this.canvas = canvas;
+        this.ctx = ctx;
+        this.flashEffects = [];
+        this.effects = [];
+        this.oldMoveIndex = 0;
+        this.start = Date.now();
+        this.isExiting = false;
+
+        this.entranceOffset = 220; // Дистанция влета
+        this.exitOffset = 0;       // Дистанция вылета
+      }
+
+      init() {
+        this.flashEffects = [];
+        this.effects = [];
+        this.oldMoveIndex = 0;
+        this.start = Date.now();
+        this.isExiting = false;
+        this.entranceOffset = 220;
+        this.exitOffset = 0;
+      }
+
+      startExit() {
+        this.isExiting = true;
+        this.flashEffects = []; // Мгновенно тушим вспышки при уходе
+      }
+
+      isFinished() {
+        return this.isExiting && this.exitOffset > 240;
+      }
+
+      destroy() {
+        this.flashEffects = [];
+        this.effects = [];
+      }
+
+      drawRect(x, y, w, h, color) {
+        this.ctx.beginPath();
+        this.ctx.fillStyle = color;
+        this.ctx.fillRect(x, y, w, h);
+      }
+
+      drawCircle(x, y, radius, color) {
+        this.ctx.beginPath();
+        this.ctx.fillStyle = color;
+        this.ctx.arc(x, y, radius, 0, 2 * Math.PI);
+        this.ctx.fill();
+      }
+
+      createLightsaber(x, y, rotation) {
+        const self = this;
+        return {
+          x: x,
+          y: y,
+          rotation: rotation,
+          rotate: 0,
+          draw: function (colorStr, swordStyle, shiftX) {
+            self.ctx.save();
+            const posX = this.x + shiftX;
+            self.ctx.translate(posX + 20, this.y);
+            self.ctx.rotate(this.rotate);
+            self.ctx.translate(-posX - 20, -this.y);
+
+            self.ctx.globalAlpha = Math.abs(Math.sin(Date.now() / 10));
+            if (swordStyle) {
+              self.drawRect(posX, this.y, 40, -110, colorStr);
+              self.drawCircle(posX + 20, this.y - 110, 20, colorStr);
+            }
+
+            self.ctx.globalAlpha = 1;
+            self.drawRect(posX + 12.5, this.y, 15, -100, swordStyle ? "white" : colorStr);
+            self.drawCircle(posX + 20.5, this.y - 100, 7.5, swordStyle ? "white" : colorStr);
+            self.ctx.restore();
+            this.rotate += this.rotation;
+          }
+        };
+      }
+
+      createContact(c1, c2, hitFlash) {
+        const self = this;
+        return {
+          lifetime: 10,
+          alpha: 0.2,
+          draw: function () {
+            // Вспышка разрешена ТОЛЬКО если мечи полностью сошлись и не выходят
+            if (!hitFlash || self.entranceOffset > 0 || self.isExiting) return;
+            self.ctx.save();
+            self.ctx.globalAlpha = this.alpha;
+            self.drawRect(0, 0, 320, 200, "white");
+            const avgH = (c1.h + c2.h) / 2;
+            const avgS = (c1.s + c2.s) / 2;
+            self.drawRect(0, 0, 320, 200, `hsla(${avgH}, ${avgS}%, 50%, 1)`);
+            self.ctx.restore();
+            this.alpha > 0 ? this.alpha -= 0.04 : this.lifetime = 0;
+          }
+        };
+      }
+
+      // --- MOVESETS ---
+      createSlash1() {
+        const self = this;
+        return {
+          elapsed: 0,
+          light1: self.createLightsaber(80, 140, 0),
+          light2: self.createLightsaber(200, 140, 0),
+          lifetime: 10,
+          count: 0,
+          isContactPhase: false,
+          draw: function (params, c1Str, c2Str, shiftL, shiftR) {
+            self.ctx.save();
+            self.ctx.transform(
+              params.scaleX / 50, 0, 0, params.scaleY / 50,
+              -160 + (params.posX * 320 / 100) + (50 - params.scaleX) * 3.1,
+              -100 + (params.posY * 200 / 100) + (50 - params.scaleY) * 2.4
+            );
+
+            this.isContactPhase = false;
+            if (this.elapsed < 10) {
+              this.light1.x -= 1; this.light1.rotation = 0.1;
+              this.light2.x += 1; this.light2.rotation = -0.1;
+            } else if (this.elapsed < 40) {
+              this.isContactPhase = true;
+              if (this.count === 0 && self.entranceOffset === 0 && !self.isExiting) {
+                self.flashEffects.push(self.createContact(params.saber1, params.saber2, params.hitFlash));
+                this.count++;
+              }
+              this.light1.y += Math.sin(Date.now() / 100); this.light1.rotation = 0;
+              this.light2.y += Math.sin(Date.now() / 100); this.light2.rotation = 0;
+            } else if (this.elapsed < 50) {
+              this.light1.x -= 7; this.light1.y -= 3; this.light1.rotation = 0.1;
+              this.light2.x += 1; this.light2.y -= 8; this.light2.rotation = 0.3;
+            } else if (this.elapsed < 60) {
+              this.light1.x += 5; this.light1.y -= 7; this.light1.rotation = 0.05;
+              this.light2.x -= 1; this.light2.y += 6; this.light2.rotation = -0.5;
+            } else if (this.elapsed < 70) {
+              this.light1.y += 9.5; this.light1.rotation = -0.25;
+              this.light2.x -= 1; this.light2.y += 1.5; this.light2.rotation = 0.3;
+            } else {
+              this.light1.rotation = 0; this.light2.rotation = 0;
+              this.light1.draw(c1Str, params.swordStyle, shiftL);
+              this.light2.draw(c2Str, params.swordStyle, shiftR);
+              self.ctx.restore();
+              this.lifetime = 0;
+              return;
+            }
+
+            this.elapsed++;
+            this.light1.draw(c1Str, params.swordStyle, shiftL);
+            this.light2.draw(c2Str, params.swordStyle, shiftR);
+            self.ctx.restore();
+          }
+        };
+      }
+
+      createSlash2() {
+        const self = this;
+        return {
+          elapsed: 0,
+          light1: self.createLightsaber(80, 140, 0),
+          light2: self.createLightsaber(200, 140, 0),
+          lifetime: 10,
+          count: 0,
+          isContactPhase: false,
+          draw: function (params, c1Str, c2Str, shiftL, shiftR) {
+            self.ctx.save();
+            self.ctx.transform(
+              params.scaleX / 50, 0, 0, params.scaleY / 50,
+              -160 + (params.posX * 320 / 100) + (50 - params.scaleX) * 3.1,
+              -100 + (params.posY * 200 / 100) + (50 - params.scaleY) * 2.4
+            );
+
+            this.isContactPhase = false;
+            if (this.elapsed < 20) {
+              this.light1.x -= 3; this.light1.rotation = 0.2;
+              this.light2.x += 2; this.light2.y -= 5; this.light2.rotation = 0.1;
+            } else if (this.elapsed < 25) {
+              this.light1.y -= 10; this.light1.x += 10; this.light1.rotation = 0;
+              this.light2.x -= 10; this.light2.y += 10; this.light2.rotation = 0;
+            } else if (this.elapsed < 40) {
+              this.light1.y -= 1; this.light1.x += 1; this.light1.rotation = -0.8;
+              this.light2.x -= 1; this.light2.y += 1; this.light2.rotation = -0.8;
+            } else if (this.elapsed < 50) {
+              this.light1.y += 1; this.light1.x -= 1; this.light1.rotation = 0.4;
+              this.light2.x += 1; this.light2.y -= 1; this.light2.rotation = 0.4;
+            } else if (this.elapsed < 75) {
+              this.light1.rotation = 0.2; this.light1.y += 2;
+              this.light2.rotation = -0.03; this.light2.y += 2;
+            } else {
+              this.light1.rotation = 0; this.light2.rotation = 0;
+              this.light1.draw(c1Str, params.swordStyle, shiftL);
+              this.light2.draw(c2Str, params.swordStyle, shiftR);
+              self.ctx.restore();
+              this.lifetime = 0;
+              return;
+            }
+
+            this.elapsed++;
+            this.light1.draw(c1Str, params.swordStyle, shiftL);
+            this.light2.draw(c2Str, params.swordStyle, shiftR);
+            self.ctx.restore();
+          }
+        };
+      }
+
+      createFeint1() {
+        const self = this;
+        return {
+          elapsed: 0,
+          light1: self.createLightsaber(80, 140, 0),
+          light2: self.createLightsaber(200, 140, 0),
+          lifetime: 10,
+          count: 0,
+          isContactPhase: false,
+          draw: function (params, c1Str, c2Str, shiftL, shiftR) {
+            self.ctx.save();
+            self.ctx.transform(
+              params.scaleX / 50, 0, 0, params.scaleY / 50,
+              -160 + (params.posX * 320 / 100) + (50 - params.scaleX) * 3.1,
+              -100 + (params.posY * 200 / 100) + (50 - params.scaleY) * 2.4
+            );
+
+            this.isContactPhase = false;
+            if (this.elapsed < 15) {
+              this.light1.x -= 1; this.light1.y -= 5; this.light1.rotation = -0.09;
+              this.light2.x += 1; this.light2.y -= 5; this.light2.rotation = 0.09;
+            } else if (this.elapsed < 25) {
+              this.light1.y += 5; this.light1.rotation = 0.85;
+              this.light2.y += 5; this.light2.rotation = -0.85;
+            } else {
+              this.light1.rotation = 0; this.light2.rotation = 0;
+              this.light1.draw(c1Str, params.swordStyle, shiftL);
+              this.light2.draw(c2Str, params.swordStyle, shiftR);
+              self.ctx.restore();
+              this.lifetime = 0;
+              return;
+            }
+
+            this.elapsed++;
+            this.light1.draw(c1Str, params.swordStyle, shiftL);
+            this.light2.draw(c2Str, params.swordStyle, shiftR);
+            self.ctx.restore();
+          }
+        };
+      }
+
+      createStab1() {
+        const self = this;
+        return {
+          elapsed: 0,
+          light1: self.createLightsaber(80, 140, 0),
+          light2: self.createLightsaber(200, 140, 0),
+          lifetime: 10,
+          count: 0,
+          isContactPhase: false,
+          draw: function (params, c1Str, c2Str, shiftL, shiftR) {
+            self.ctx.save();
+            self.ctx.transform(
+              params.scaleX / 50, 0, 0, params.scaleY / 50,
+              -160 + (params.posX * 320 / 100) + (50 - params.scaleX) * 3.1,
+              -100 + (params.posY * 200 / 100) + (50 - params.scaleY) * 2.4
+            );
+
+            this.isContactPhase = false;
+            if (this.elapsed < 20) {
+              this.light1.x -= 4; this.light1.y -= 3; this.light1.rotation = 0.431;
+              this.light2.x += 3; this.light2.rotation = -0.04;
+            } else if (this.elapsed < 35) {
+              this.light1.y += 0.5; this.light1.x -= 2; this.light1.rotation = 0;
+              this.light2.y -= 1; this.light2.rotation = 0;
+            } else if (this.elapsed < 40) {
+              this.light1.x += 40; this.light1.rotation = -0.1;
+              this.light2.x -= 5; this.light2.rotation = 0.15;
+            } else if (this.elapsed < 50) {
+              this.isContactPhase = true;
+              if (this.count === 0 && self.entranceOffset === 0 && !self.isExiting) {
+                self.flashEffects.push(self.createContact(params.saber1, params.saber2, params.hitFlash));
+                this.count++;
+              }
+              this.light1.rotation = 0; this.light2.rotation = 0;
+            } else if (this.elapsed < 60) {
+              this.light1.rotation = 0.08; this.light1.x -= 20;
+              this.light2.x -= 4; this.light2.y += 3; this.light2.rotation = -0.3;
+            } else if (this.elapsed < 65) {
+              this.light1.rotation = 0; this.light2.rotation = 0;
+            } else if (this.elapsed < 75) {
+              this.light1.rotation = -0.3; this.light1.x += 10; this.light1.y += 8;
+              this.light2.rotation = 0.4;
+            } else {
+              this.light1.rotation = 0; this.light2.rotation = 0;
+              this.light1.draw(c1Str, params.swordStyle, shiftL);
+              this.light2.draw(c2Str, params.swordStyle, shiftR);
+              self.ctx.restore();
+              this.lifetime = 0;
+              return;
+            }
+
+            this.elapsed++;
+            this.light1.draw(c1Str, params.swordStyle, shiftL);
+            this.light2.draw(c2Str, params.swordStyle, shiftR);
+            self.ctx.restore();
+          }
+        };
+      }
+
+      createStab2() {
+        const self = this;
+        return {
+          elapsed: 0,
+          light1: self.createLightsaber(80, 140, 0),
+          light2: self.createLightsaber(200, 140, 0),
+          lifetime: 10,
+          count: 0,
+          isContactPhase: false,
+          draw: function (params, c1Str, c2Str, shiftL, shiftR) {
+            self.ctx.save();
+            self.ctx.transform(
+              params.scaleX / 50, 0, 0, params.scaleY / 50,
+              -160 + (params.posX * 320 / 100) + (50 - params.scaleX) * 3.1,
+              -100 + (params.posY * 200 / 100) + (50 - params.scaleY) * 2.4
+            );
+
+            this.isContactPhase = false;
+            if (this.elapsed < 15) {
+              this.light1.x -= 2; this.light1.y -= 5; this.light1.rotation = -0.1;
+              this.light2.x -= 2; this.light2.rotation = -0.04;
+            } else if (this.elapsed < 25) {
+              this.light1.x += 2; this.light1.y += 5; this.light1.rotation = 0.45;
+              this.light2.x += 10; this.light2.y -= 5; this.light2.rotation = -0.15;
+            } else if (this.elapsed < 35) {
+              this.light1.x -= 1; this.light1.y -= 1; this.light1.rotation = 0;
+              this.light2.x += 1; this.light2.y -= 1; this.light2.rotation = 0;
+            } else if (this.elapsed < 42.5) {
+              this.light1.x += 5; this.light1.rotation = -0.45;
+              this.light2.x -= 20; this.light2.rotation = 0.09;
+            } else if (this.elapsed < 55) {
+              this.light1.x -= 2; this.light1.rotation = 0.1;
+              this.light2.x += 15; this.light2.rotation = 0;
+            } else if (this.elapsed < 62.5) {
+              this.light1.x -= 3; this.light1.y += 9; this.light1.rotation = -0.3;
+              this.light2.x -= 25; this.light2.rotation = -0.1;
+            } else if (this.elapsed < 67.5) {
+              this.light1.x += 1; this.light1.y -= 3; this.light1.rotation = 0;
+              this.light2.x += 10; this.light2.rotation = 0;
+            } else if (this.elapsed < 75) {
+              this.light1.x += 4; this.light1.y -= 6; this.light1.rotation = 0.32;
+              this.light2.x += 9; this.light2.y += 8; this.light2.rotation = 0.365;
+            } else {
+              this.light1.rotation = 0; this.light2.rotation = 0;
+              this.light1.draw(c1Str, params.swordStyle, shiftL);
+              this.light2.draw(c2Str, params.swordStyle, shiftR);
+              self.ctx.restore();
+              this.lifetime = 0;
+              return;
+            }
+
+            this.elapsed++;
+            this.light1.draw(c1Str, params.swordStyle, shiftL);
+            this.light2.draw(c2Str, params.swordStyle, shiftR);
+            self.ctx.restore();
+          }
+        };
+      }
+
+      spawnNextMove() {
+        let index = Math.floor(Math.random() * 5);
+        if (index === this.oldMoveIndex) {
+          index = index >= 4 ? index - 1 : index + 1;
+        }
+        this.oldMoveIndex = index;
+
+        switch (index) {
+          case 0: this.effects.push(this.createSlash1()); break;
+          case 1: this.effects.push(this.createSlash2()); break;
+          case 2: this.effects.push(this.createStab1()); break;
+          case 3: this.effects.push(this.createStab2()); break;
+          case 4: this.effects.push(this.createFeint1()); break;
+        }
+      }
+
+      update(params) {
+        const now = Date.now();
+        const elapsed = now - this.start;
+        // Оригинальная формула скорости SignalRGB
+        const speedVal = (params && params.speed) ? params.speed : 50;
+        const speedThreshold = 2000 / Math.max(1, speedVal);
+
+        // Спавним первый удар, если сцена пуста
+        if (this.effects.length < 1) {
+          this.spawnNextMove();
+        }
+
+        // ЖЕСТКИЙ ТАКТОВЫЙ ФИЛЬТР: Двигаем физику боя ТОЛЬКО по таймеру скорости!
+        if (elapsed >= speedThreshold || elapsed < 0) {
+          this.start = now;
+
+          const c1Str = `hsl(${params.saber1.h}, ${params.saber1.s}%, ${params.saber1.l}%)`;
+          const c2Str = `hsl(${params.saber2.h}, ${params.saber2.s}%, ${params.saber2.l}%)`;
+
+          // 1. Плавный влет (шаг по 3.5 px)
+          if (this.entranceOffset > 0) {
+            this.entranceOffset = Math.max(0, this.entranceOffset - 3.5);
+          }
+
+          // 2. Плавный вылет (шаг по 3.5 px)
+          if (this.isExiting) {
+            this.exitOffset += 3.5;
+          }
+
+          // 3. Затирание фона с оригинальным шлейфом backgroundFade
+          if (!this.isExiting) {
+            this.ctx.save();
+            const fadeAlpha = (params.backgroundFade !== undefined ? params.backgroundFade : 50) / 100;
+            this.ctx.globalAlpha = Math.max(0.01, Math.min(1.0, fadeAlpha));
+            this.drawRect(0, 0, 320, 200, "black");
+            this.ctx.restore();
+          }
+
+          // 4. Вспышки
+          for (let i = this.flashEffects.length - 1; i >= 0; i--) {
+            const ele = this.flashEffects[i];
+            ele.draw();
+            if (ele.lifetime <= 0) {
+              this.flashEffects.splice(i, 1);
+            }
+          }
+
+          // 5. Отрисовка ударов с идеальным смещением
+          const shiftL = -this.entranceOffset - this.exitOffset;
+          const shiftR = this.entranceOffset + this.exitOffset;
+
+          // Сторож зависания конкретного мувсета
+          if (this.effects.length > 0 && this.effects[0].elapsed > 120) {
+            Logger.warn('[LightsaberDuel] Move timed out (stuck frame prevention), forcing next move.');
+            this.effects = [];
+            this.spawnNextMove();
+            return;
+          }
+
+          for (let i = this.effects.length - 1; i >= 0; i--) {
+            const ele = this.effects[i];
+            ele.draw(params, c1Str, c2Str, shiftL, shiftR);
+            if (ele.lifetime <= 0) {
+              this.effects.splice(i, 1);
+            }
+          }
+        }
+      }
+    }
+
+    // =========================================================================
+    // MODULE: TERMINAL (SMOOTH SCALING + TRAIL PERSISTENCE ON EXIT)
+    // =========================================================================
+    class TerminalEffect {
+      constructor(canvas, ctx) {
+        this.canvas = canvas;
+        this.ctx = ctx;
+        this.charArr = ['a','b','c','d','e','f','g','h','i','j','k','l','m','n','o','p','q','r','s','t','u','v','w','x','y','z','0','1','2','3','4','5','6','7','8','9','@','#','$','%','&','*'];
+        this.fallingCharArr = [];
+        this.isExiting = false;
+      }
+
+      init() {
+        this.fallingCharArr = [];
+        this.isExiting = false;
+      }
+
+      startExit() {
+        this.isExiting = true;
+      }
+
+      isFinished() {
+        return this.isExiting && this.fallingCharArr.length === 0;
+      }
+
+      destroy() {
+        for (let i = 0; i < this.fallingCharArr.length; i++) {
+          this.fallingCharArr[i].trail = [];
+        }
+        this.fallingCharArr = [];
+      }
+
+      createPoint(colIndex, x, y, fSize) {
+        return {
+          colIndex: colIndex,
+          x: x,
+          y: y,
+          value: this.charArr[Math.floor(Math.random() * this.charArr.length)].toUpperCase(),
+          speed: 1.5 + Math.random() * 3.5,
+          trail: [] // История позиций для сохранения шлейфа
+        };
+      }
+
+      update(params) {
+        const fSize = Math.max(5, params.fontSize);
+        const requiredColumns = Math.ceil(320 / fSize);
+
+        // 1. Очистка фона (только пока эффект активен)
+        if (!this.isExiting) {
+          this.ctx.fillStyle = "rgba(0, 0, 0, 0.25)";
+          this.ctx.fillRect(0, 0, 320, 200);
+        }
+
+        // 2. Доспавн недостающих колонок при уменьшении шрифта
+        if (!this.isExiting) {
+          if (this.fallingCharArr.length === 0) {
+            for (let i = 0; i < requiredColumns; i++) {
+              this.fallingCharArr.push(this.createPoint(i, i * fSize, -Math.random() * 300, fSize));
+            }
+          } else {
+            for (let i = this.fallingCharArr.length; i < requiredColumns; i++) {
+              this.fallingCharArr.push(this.createPoint(i, i * fSize, -Math.random() * 100, fSize));
+            }
+          }
+        }
+
+        this.ctx.font = `${fSize.toFixed(1)}px monospace, sans-serif`;
+
+        // 3. Отрисовка падающих букв и их хвостов
+        for (let i = this.fallingCharArr.length - 1; i >= 0; i--) {
+          const pt = this.fallingCharArr[i];
+
+          // Плавная подстройка X под текущий шрифт
+          const targetX = pt.colIndex * fSize;
+          pt.x += (targetX - pt.x) * 0.05;
+
+          // Мутация главного символа
+          if (Math.random() < 0.15) {
+            pt.value = this.charArr[Math.floor(Math.random() * this.charArr.length)].toUpperCase();
+          }
+
+          // Пул переиспользования: двигаем один и тот же объект, не нагружая Garbage Collector!
+          if (pt.trail.length < 8) {
+            pt.trail.unshift({ x: pt.x, y: pt.y, char: pt.value });
+          } else {
+            const recycled = pt.trail.pop();
+            recycled.x = pt.x;
+            recycled.y = pt.y;
+            recycled.char = pt.value;
+            pt.trail.unshift(recycled);
+          }
+
+          // А. Отрисовка затухающего хвоста (работает ВСЕГДА, даже при выходе!)
+          for (let t = 0; t < pt.trail.length; t++) {
+            const tr = pt.trail[t];
+            const trailAlpha = (1 - (t + 1) / (pt.trail.length + 1)) * 0.6;
+            this.ctx.fillStyle = `hsla(${params.color.h}, ${params.color.s}%, ${Math.max(15, params.color.l - t * 4)}%, ${trailAlpha})`;
+            this.ctx.fillText(tr.char, tr.x, tr.y);
+          }
+
+          // Б. Отрисовка главной головы символа (самая яркая)
+          this.ctx.fillStyle = `hsl(${params.color.h}, ${params.color.s}%, ${Math.min(95, params.color.l + 25)}%)`;
+          this.ctx.fillText(pt.value, pt.x, pt.y);
+
+          pt.y += pt.speed;
+
+          // В. Завершение полета
+          if (pt.y > 200 + (pt.trail.length * fSize)) {
+            if (this.isExiting || pt.colIndex >= requiredColumns) {
+              this.fallingCharArr.splice(i, 1);
+            } else {
+              pt.y = -Math.random() * 40;
+              pt.speed = 1.5 + Math.random() * 3.5;
+              pt.trail = [];
+            }
+          }
+        }
+      }
+    }
+
+    // =========================================================================
+    // MODULE: SIDE TO SIDE (ZERO-LEAK BUFFER)
+    // =========================================================================
+    class SideToSideEffect {
+      // Единый статический буфер на всю жизнь приложения (не плодит холсты в RAM!)
+      static sharedBuffer = null;
+      static sharedCtx = null;
+
+      constructor(canvas, ctx) {
+        this.canvas = canvas;
+        this.ctx = ctx;
+
+        if (!SideToSideEffect.sharedBuffer) {
+          SideToSideEffect.sharedBuffer = document.createElement('canvas');
+          SideToSideEffect.sharedBuffer.width = 320;
+          SideToSideEffect.sharedBuffer.height = 200;
+          SideToSideEffect.sharedCtx = SideToSideEffect.sharedBuffer.getContext('2d');
+        }
+        this.buffer = SideToSideEffect.sharedBuffer;
+        this.bCtx = SideToSideEffect.sharedCtx;
+
+        this.effects = [];
+        this.gIndex = 0;
+        this.isExiting = false;
+
+        this.fadeStep = 1 / 480;
+        this.entranceAlpha = 0.0;
+        this.exitAlpha = 1.0;
+
+        this.drawRectBuf(0, 0, 320, 200, `hsl(${Math.random() * 360}, 100%, 50%)`);
+      }
+
+      init() {
+        this.effects = [];
+        this.gIndex = 0;
+        this.isExiting = false;
+        this.entranceAlpha = 0.0;
+        this.exitAlpha = 1.0;
+
+        this.drawRectBuf(0, 0, 320, 200, `hsl(${Math.random() * 360}, 100%, 50%)`);
+      }
+
+      startExit() {
+        this.isExiting = true;
+      }
+
+      isFinished() {
+        return this.isExiting && this.exitAlpha <= 0;
+      }
+
+      destroy() {
+        this.effects = [];
+        // Очищаем содержимое общего буфера, не создавая и не бросая объекты в куче
+        if (this.bCtx) {
+          this.bCtx.clearRect(0, 0, 320, 200);
+        }
+      }
+
+      drawRectBuf(x, y, width, height, color) {
+        this.bCtx.beginPath();
+        this.bCtx.fillStyle = color;
+        this.bCtx.fillRect(x, y, width, height);
+      }
+
+      createSideSweep(mod) {
+        const self = this;
+        const colorStr = `hsl(${Math.random() * 360}, 100%, 50%)`;
+        return {
+          x: 320,
+          mod: mod,
+          color: colorStr,
+          lifetime: 10,
+          draw: function(speed) {
+            self.bCtx.save();
+            self.bCtx.translate(160, 100);
+            self.bCtx.scale(1 - this.mod * 2, 1);
+            self.bCtx.translate(-160, -100);
+            self.drawRectBuf(this.x, 0, 330, 200, this.color);
+            self.bCtx.restore();
+
+            if (this.x > 0) {
+              this.x -= Math.max(1, speed) / 10;
+            } else {
+              this.lifetime = 0;
+            }
+          }
+        };
+      }
+
+      createVertSweep(mod) {
+        const self = this;
+        const colorStr = `hsl(${Math.random() * 360}, 100%, 50%)`;
+        return {
+          y: 200,
+          mod: mod,
+          color: colorStr,
+          lifetime: 10,
+          draw: function(speed) {
+            self.bCtx.save();
+            self.bCtx.translate(160, 100);
+            self.bCtx.scale(1, 1 - this.mod * 2);
+            self.bCtx.translate(-160, -100);
+            self.drawRectBuf(0, this.y, 320, 210, this.color);
+            self.bCtx.restore();
+
+            if (this.y > 0) {
+              this.y -= Math.max(1, speed) / 10;
+            } else {
+              this.lifetime = 0;
+            }
+          }
+        };
+      }
+
+      spawnNextSweep() {
+        this.gIndex = this.gIndex < 3 ? this.gIndex + 1 : 0;
+        if (this.gIndex === 0) this.effects.push(this.createSideSweep(1));
+        if (this.gIndex === 1) this.effects.push(this.createVertSweep(1));
+        if (this.gIndex === 2) this.effects.push(this.createSideSweep(0));
+        if (this.gIndex === 3) this.effects.push(this.createVertSweep(0));
+      }
+
+      update(params) {
+        const curSpeed = (params && params.speed) ? params.speed : 40;
+
+        // 1. Отрисовка цветных волн в буфер
+        if (this.effects.length < 1) {
+          this.spawnNextSweep();
+        }
+
+        for (let i = 0; i < this.effects.length; i++) {
+          this.effects[i].draw(curSpeed);
+        }
+        this.effects = this.effects.filter(ele => ele.lifetime > 0);
+
+        // 2. Плавный 8-секундный Fade In (нарастание яркости на входе)
+        if (!this.isExiting && this.entranceAlpha < 1.0) {
+          this.entranceAlpha = Math.min(1.0, this.entranceAlpha + this.fadeStep);
+        }
+
+        // 3. Плавный 8-секундный Fade Out (растворение на выходе)
+        if (this.isExiting) {
+          this.exitAlpha = Math.max(0, this.exitAlpha - this.fadeStep);
+        }
+
+        // Итоговая прозрачность кадра
+        const finalAlpha = this.isExiting ? this.exitAlpha : this.entranceAlpha;
+
+        // 4. Отрисовка на главный экран
+        if (finalAlpha > 0) {
+          this.ctx.save();
+          this.ctx.globalAlpha = finalAlpha;
+          this.ctx.drawImage(this.buffer, 0, 0);
+          this.ctx.restore();
+        }
+      }
+    }
+
+
+    // =========================================================================
+    // EFFECT MANAGER (БЕСШОВНЫЙ ПЕРЕКРЕСТНЫЙ CROSSFADE)
+    // =========================================================================
+    class EffectManager {
+      constructor() {
+        this.canvas = document.getElementById("exCanvas");
+        this.ctx = this.canvas.getContext("2d");
+
+        this.registry = {
+          RainbowData:    { Effect: RainbowDataEffect,    Controller: RainbowParameterController,    config: RAINBOW_CONFIG },
+          PastelDream:    { Effect: PastelDreamEffect,    Controller: PastelParameterController,    config: PASTEL_CONFIG },
+          VaporWave:      { Effect: VaporWaveEffect,      Controller: VaporWaveParameterController,   config: VAPOR_CONFIG },
+          Radar:          { Effect: RadarEffect,          Controller: RadarParameterController,       config: RADAR_CONFIG },
+          Rain:           { Effect: RainEffect,           Controller: RainParameterController,        config: RAIN_CONFIG },
+          LightsaberDuel: { Effect: LightsaberDuelEffect, Controller: LightsaberParameterController, config: LIGHTSABER_CONFIG },
+          Terminal:       { Effect: TerminalEffect,       Controller: TerminalParameterController,   config: TERMINAL_CONFIG },
+          SideToSide:     { Effect: SideToSideEffect,     Controller: SideToSideParameterController, config: SIDETOSIDE_CONFIG }
+        };
+
+        this.currentKey = null;
+        this.activeEffect = null;
+        this.activeController = null;
+        this.exitingEffect = null;
+        this.exitingController = null;
+        this.nextSwitchTime = 0;
+
+        // ПРОВЕРКА ВРЕМЕНИ ПРИ ХОЛОДНОМ СТАРТЕ
+        const isNight = checkIsNight();
+        this.sunsetStartedLogged = isNight;
+        this.sunriseStartedLogged = !isNight;
+        this.fullyAwakeLogged = !isNight;
+
+        // Прогресс ночного режима от 0.0 (день) до 1.0 (глубокая ночь)
+        this.nightProgress = isNight ? 1.0 : 0.0;
+
+        if (isNight) {
+          // Если запустили ночью — СРАЗУ 100% ТЬМА И ГЛУБОКИЙ СОН
+          this.isSleeping = true;
+          this.ctx.fillStyle = '#000000';
+          this.ctx.fillRect(0, 0, 320, 200);
+          Logger.log('[NIGHT MODE] Cold start at NIGHT. Direct entry to deep sleep blackout.');
+        } else {
+          // Если запустили днем — СТАРТУЕМ СВЕТ
+          this.isSleeping = false;
+          this.switchEffect();
+        }
+
+        this.isContextLost = false;
+        this.lastFrameTimestamp = Date.now();
+        this.lastMemoryCheckTime = Date.now();
+
+        // Событийный импульс при разворачивании окна (без фоновых таймеров!)
+        const handleWindowRestore = () => {
+          const now = Date.now();
+          // Если кадры просели во время сворачивания — мягко перезапускаем конвейер
+          if (now - this.lastFrameTimestamp > 2000) {
+            this.lastFrameTimestamp = now;
+            window.requestAnimationFrame(this.loop);
+          }
+          if (this.activeEffect && typeof this.activeEffect.start !== 'undefined') {
+            this.activeEffect.start = now;
+          }
+        };
+
+        window.addEventListener('focus', handleWindowRestore);
+        document.addEventListener('visibilitychange', () => {
+          if (!document.hidden) handleWindowRestore();
+        });
+
+        Logger.log('EffectManager initialized. Continuous frame engine started.');
+        Logger.logMemory();
+
+        this.loop = this.loop.bind(this);
+      }
+
+      getNextKey() {
+        const availableWeights = { ...GLOBAL_CONFIG.weights };
+        if (this.currentKey && Object.keys(availableWeights).length > 1) {
+          delete availableWeights[this.currentKey];
+        }
+        return randomWeighted(availableWeights);
+      }
+
+      switchEffect() {
+        try {
+          // Если предыдущий уходящий эффект еще не долетел — уничтожаем его начисто
+          if (this.exitingEffect) {
+            this.exitingEffect.destroy();
+            this.exitingEffect = null;
+            this.exitingController = null;
+          }
+
+          // Текущий активный эффект становится уходящим
+          if (this.activeEffect) {
+            this.exitingEffect = this.activeEffect;
+            this.exitingController = this.activeController;
+            this.exitingEffect.startExit();
+            this.activeEffect = null;
+            this.activeController = null;
+          }
+
+          // МГНОВЕННО рождаем новый эффект!
+          const nextKey = this.getNextKey();
+          const item = this.registry[nextKey];
+
+          this.currentKey = nextKey;
+          this.activeController = new item.Controller(item.config);
+          this.activeEffect = new item.Effect(this.canvas, this.ctx);
+          this.activeEffect.init();
+
+          const [minSec, maxSec] = getSwitchInterval();
+          const waitSec = randomGaussian(minSec, maxSec);
+          this.nextSwitchTime = Date.now() + (waitSec * 1000);
+
+          Logger.log(`Switched to [${nextKey}]. Next switch in ${(waitSec / 60).toFixed(1)} min.`);
+        } catch (err) {
+          Logger.error('Failed during switchEffect()', err);
+        }
+      }
+
+      start() {
+        window.requestAnimationFrame(this.loop);
+      }
+
+      loop() {
+        try {
+          this.lastFrameTimestamp = Date.now();
+          const now = this.lastFrameTimestamp;
+
+          // 1. Адаптивное логирование памяти (5 мин днем / 20 мин ночью)
+          const memInterval = this.isSleeping 
+            ? (GLOBAL_CONFIG.nightMemoryLogIntervalMs || 1200000) 
+            : (GLOBAL_CONFIG.dayMemoryLogIntervalMs || 300000);
+
+          if (now - this.lastMemoryCheckTime >= memInterval) {
+            Logger.logMemory();
+            this.lastMemoryCheckTime = now;
+          }
+
+          // Если видеокарта сбросила контекст — ждем аппаратного восстановления
+          if (this.isContextLost) {
+            return;
+          }
+
+          const isNight = checkIsNight();
+          const dur = (typeof fadeDuration !== 'undefined') ? Math.max(1, parseFloat(fadeDuration)) : 60;
+          const fadeStep = 1 / (dur * 60);
+
+          // 2. ДВИЖЕНИЕ ПРОГРЕССА СНА/БОДРСТВОВАНИЯ
+          if (isNight) {
+            if (!this.sunsetStartedLogged) {
+              Logger.log(`[NIGHT MODE TRIGGER] Sleep schedule reached! Sunset started (Duration: ${dur.toFixed(0)}s, Gamma: 2.2).`);
+              this.sunsetStartedLogged = true;
+              this.sunriseStartedLogged = false;
+              this.fullyAwakeLogged = false;
+            }
+
+            if (this.nightProgress < 1.0) {
+              this.nightProgress = Math.min(1.0, this.nightProgress + fadeStep);
+            }
+          } else {
+            if (!this.sunriseStartedLogged && this.isSleeping) {
+              Logger.log(`[NIGHT MODE TRIGGER] Wake schedule reached! Sunrise started (Duration: ${dur.toFixed(0)}s, Gamma: 2.2).`);
+              this.sunriseStartedLogged = true;
+              this.sunsetStartedLogged = false;
+            }
+
+            if (this.nightProgress > 0.0) {
+              this.nightProgress = Math.max(0.0, this.nightProgress - fadeStep);
+            } else if (!this.fullyAwakeLogged && !this.isSleeping) {
+              Logger.log('[NIGHT MODE] Sunrise complete! 100% full brightness reached.');
+              this.fullyAwakeLogged = true;
+            }
+          }
+
+          // ГАММА-КОРРЕКЦИЯ ДЛЯ ГЛАЗ (Стандартная кривая гаммы 2.2 для LED)
+          // perceivedLight: от 1.0 (полный свет) до 0.0 (тьма)
+          const perceivedLight = 1.0 - this.nightProgress;
+          // physicalLight: физический свет диодов по степенному закону
+          const physicalLight = Math.pow(perceivedLight, 2.2);
+          // Плотность черного занавеса
+          const gammaAlpha = Math.max(0, Math.min(1.0, 1.0 - physicalLight));
+
+          // 3. НОЧНОЙ РЕЖИМ (100% ТЬМА ДОСТИГНУТА)
+          if (this.nightProgress >= 1.0) {
+            if (!this.isSleeping) {
+              this.isSleeping = true;
+              Logger.log('[NIGHT MODE] Sunset complete! 100% Blackout. Memory disposed, running continuous black frame.');
+
+              // Полная зачистка памяти от дневных эффектов
+              if (this.activeEffect) { this.activeEffect.destroy(); this.activeEffect = null; }
+              if (this.exitingEffect) { this.exitingEffect.destroy(); this.exitingEffect = null; }
+              this.activeController = null;
+              this.exitingController = null;
+
+              Logger.logMemory();
+            }
+
+            // Рисуем сплошной черный цвет, конвейер кадров Chromium живет!
+            this.ctx.fillStyle = '#000000';
+            this.ctx.fillRect(0, 0, 320, 200);
+            return;
+          }
+
+          // 4. УТРЕННЕЕ ПРОБУЖДЕНИЕ
+          if (this.isSleeping && !isNight) {
+            this.isSleeping = false;
+            Logger.log('[NIGHT MODE] Spawning initial day effect under the fading curtain.');
+            this.switchEffect();
+          }
+
+          // 5. ДНЕВНАЯ РОТАЦИЯ ЭФФЕКТОВ
+          if (now >= this.nextSwitchTime) {
+            this.switchEffect();
+          }
+
+          if (this.activeEffect && this.activeController) {
+            if (this.currentKey === 'LightsaberDuel' && this.activeEffect.effects) {
+              const hasActiveHit = this.activeEffect.flashEffects.length > 0 ||
+                this.activeEffect.effects.some(e => e.isContactPhase);
+              this.activeController.setHitLock(hasActiveHit);
+            }
+
+            this.activeController.update();
+            const activeParams = this.activeController.getValues();
+            this.activeEffect.update(activeParams);
+          }
+
+          if (this.exitingEffect && this.exitingController) {
+            this.exitingController.update();
+            const exitingParams = this.exitingController.getValues();
+            this.exitingEffect.update(exitingParams);
+
+            if (this.exitingEffect.isFinished()) {
+              this.exitingEffect.destroy();
+              this.exitingEffect = null;
+              this.exitingController = null;
+            }
+          }
+
+          // 6. Наложение занавеса с гамма-коррекцией
+          if (gammaAlpha > 0) {
+            this.ctx.fillStyle = `rgba(0, 0, 0, ${gammaAlpha})`;
+            this.ctx.fillRect(0, 0, 320, 200);
+          }
+        } catch (err) {
+          Logger.error(`Error in render loop() while running [${this.currentKey}]`, err);
+        } finally {
+          // ГАРАНТИЯ МАГАЗИННОГО ЭФФЕКТА: requestAnimationFrame вызывается ВСЕГДА!
+          window.requestAnimationFrame(this.loop);
+        }
+      }
+    }
+
+    const manager = new EffectManager();
+    manager.start();
+
+    // Мгновенный пересчет при смене интервалов смены эффектов
+    window.onminSwitchMinChanged = 
+    window.onmaxSwitchMinChanged = function() {
+      if (manager) {
+        const [minSec, maxSec] = getSwitchInterval();
+        const waitSec = randomGaussian(minSec, maxSec);
+        manager.nextSwitchTime = Date.now() + (waitSec * 1000);
+        Logger.log(`[SETTINGS CHANGED] Effect switch timer updated: ${(waitSec / 60).toFixed(1)} min (${waitSec.toFixed(0)} sec)`);
+      }
+    };
+
+    // Слушатели смены времени СНА (Sleep Time)
+    window.onsleepHourChanged = 
+    window.onsleepMinuteChanged = function() {
+      const sh = (typeof sleepHour !== 'undefined') ? parseInt(sleepHour, 10) : 1;
+      const sm = (typeof sleepMinute !== 'undefined') ? parseInt(sleepMinute, 10) : 0;
+      const timeStr = `${String(sh).padStart(2, '0')}:${String(sm).padStart(2, '0')}`;
+      Logger.log(`[SETTINGS CHANGED] Sleep schedule time updated to -> ${timeStr}`);
+    };
+
+    // Слушатели смены времени ПРОБУЖДЕНИЯ (Wake Time)
+    window.onwakeHourChanged = 
+    window.onwakeMinuteChanged = function() {
+      const wh = (typeof wakeHour !== 'undefined') ? parseInt(wakeHour, 10) : 11;
+      const wm = (typeof wakeMinute !== 'undefined') ? parseInt(wakeMinute, 10) : 0;
+      const timeStr = `${String(wh).padStart(2, '0')}:${String(wm).padStart(2, '0')}`;
+      Logger.log(`[SETTINGS CHANGED] Wake schedule time updated to -> ${timeStr}`);
+    };
+
+    // Слушатель смены длительности Fade
+    window.onfadeDurationChanged = function() {
+      const dur = (typeof fadeDuration !== 'undefined') ? parseFloat(fadeDuration) : 60;
+      Logger.log(`[SETTINGS CHANGED] Fade duration updated to -> ${dur} seconds`);
+    };
+
+  </script>
+</body>
+</html>

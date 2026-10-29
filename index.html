@@ -1,0 +1,432 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>SignalRGB Local Studio</title>
+    <style>
+        body {
+            margin: 0;
+            display: flex;
+            height: 100vh;
+            background-color: #0f0f12;
+            color: #fff;
+            font-family: 'Segoe UI', sans-serif;
+            overflow: hidden;
+        }
+
+        #sidebar {
+            width: 320px;
+            background: #16161e;
+            border-right: 1px solid #282836;
+            padding: 20px;
+            box-sizing: border-box;
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+            overflow-y: auto;
+        }
+
+        h2 {
+            margin: 0;
+            font-size: 16px;
+            color: #00e5ff;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .effect-selector-group {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            background: #1f1f2e;
+            padding: 12px;
+            border-radius: 6px;
+            border: 1px solid #2e2e42;
+        }
+
+        select {
+            background: #12121a;
+            color: #fff;
+            border: 1px solid #3b3b54;
+            padding: 8px;
+            border-radius: 4px;
+            outline: none;
+            cursor: pointer;
+            font-size: 13px;
+        }
+
+        optgroup {
+            background: #1f1f2e;
+            color: #00e5ff;
+            font-weight: bold;
+        }
+
+        option {
+            background: #12121a;
+            color: #fff;
+            font-weight: normal;
+        }
+
+        hr {
+            border: none;
+            border-top: 1px solid #282836;
+            margin: 5px 0;
+        }
+
+        #viewport {
+            flex: 1;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            background: radial-gradient(circle, #1a1a24 0%, #0a0a0d 100%);
+            overflow: auto;
+            padding: 20px;
+        }
+
+        #preview-wrapper {
+            width: 640px;
+            height: 400px;
+            border: 2px solid #2a2a3a;
+            border-radius: 6px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.8);
+            overflow: hidden;
+            background: #000;
+            transition: width 0.05s linear, height 0.05s linear;
+        }
+
+        iframe {
+            width: 100%;
+            height: 100%;
+            border: none;
+            display: block;
+        }
+
+        .gui-control {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+        .gui-control label {
+            font-size: 13px;
+            color: #a0a0b0;
+            display: flex;
+            justify-content: space-between;
+        }
+        .gui-control input[type="range"] {
+            width: 100%;
+            accent-color: #00e5ff;
+            cursor: pointer;
+        }
+        .gui-control input[type="color"] {
+            width: 100%;
+            height: 35px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            background: transparent;
+        }
+        .gui-checkbox {
+            flex-direction: row !important;
+            align-items: center;
+            justify-content: space-between;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="sidebar">
+        <h2>SignalRGB Studio</h2>
+        
+        <div class="effect-selector-group">
+            <label style="font-size: 11px; color: #00e5ff;">ВЫБОР ЭФФЕКТА (АВТО-ПОИСК):</label>
+            <select id="effect-select">
+                <option value="">Сканирование папок...</option>
+            </select>
+        </div>
+
+        <div class="effect-selector-group">
+            <label style="font-size: 11px; color: #00e5ff; display: flex; justify-content: space-between;">
+                <span>РАЗМЕР ПРЕДПРОСМОТРА:</span>
+                <span id="size-val" style="color: #fff; font-weight: bold;">640 × 400</span>
+            </label>
+            <input type="range" id="size-slider" min="320" max="1280" step="32" value="640" style="accent-color: #00e5ff; cursor: pointer;">
+        </div>
+
+        <hr>
+
+        <h3 style="margin:0; font-size: 13px; color: #888;">НАСТРОЙКИ ЭФФЕКТА:</h3>
+        
+        <div id="dynamic-controls" style="display:flex; flex-direction:column; gap:16px;"></div>
+    </div>
+
+    <div id="viewport">
+        <div id="preview-wrapper">
+            <iframe id="effect-frame"></iframe>
+        </div>
+    </div>
+
+<script>
+    // =========================================================================
+    // ПАПКИ ДЛЯ СКАНИРОВАНИЯ
+    // =========================================================================
+    const SCAN_DIRECTORIES = [
+        { label: "Готовые паки (Effects)", path: "Effects/" },
+        { label: "Тестовые (sandbox)", path: "sandbox/" }
+    ];
+
+    const selector = document.getElementById('effect-select');
+    const iframe = document.getElementById('effect-frame');
+    const controlsContainer = document.getElementById('dynamic-controls');
+    
+    const sizeSlider = document.getElementById('size-slider');
+    const sizeVal = document.getElementById('size-val');
+    const previewWrapper = document.getElementById('preview-wrapper');
+
+    // 1. РЕГУЛИРОВКА РАЗМЕРА ОКНА ПРЕДПРОСМОТРА
+    sizeSlider.addEventListener('input', (e) => {
+        const w = parseInt(e.target.value);
+        const h = Math.round(w * (200 / 320));
+        previewWrapper.style.width = w + 'px';
+        previewWrapper.style.height = h + 'px';
+        sizeVal.innerText = `${w} × ${h}`;
+    });
+
+    // 2. НАДЕЖНЫЙ СКАНИРОВАТЕЛЬ (ИЩЕТ И ПРЯМЫЕ ФАЙЛЫ, И ПОДПАПКИ С EFFECT.HTML)
+    async function autoScanEffects() {
+        selector.innerHTML = '';
+        let totalCount = 0;
+        const parser = new DOMParser();
+
+        const SCAN_DIRS = [
+            { label: "Готовые паки (Effects)", basePath: "Effects/" },
+            { label: "Тестовые (sandbox)", basePath: "sandbox/" }
+        ];
+
+        for (const dir of SCAN_DIRS) {
+            const group = document.createElement('optgroup');
+            group.label = dir.label;
+
+            try {
+                const resp = await fetch(dir.basePath);
+                if (!resp.ok) continue;
+                const html = await resp.text();
+                const doc = parser.parseFromString(html, 'text/html');
+                const links = Array.from(doc.querySelectorAll('a'));
+
+                const items = links
+                    .map(a => a.getAttribute('href'))
+                    .filter(h => h && !h.startsWith('http') && h !== '../' && h !== './' && !h.startsWith('?'))
+                    .map(h => decodeURIComponent(h.replace(/\/$/, '').split('/').pop()))
+                    .filter(name => name && name !== '.' && name !== '..');
+
+                const uniqueItems = [...new Set(items)];
+
+                for (const item of uniqueItems) {
+                    // 1. Прямой HTML файл (например sandbox/file.html)
+                    if (item.toLowerCase().endsWith('.html')) {
+                        const filePath = `${dir.basePath}${item}`;
+                        await addOptionIfValid(filePath, item, group, parser);
+                    }
+                    // 2. Подпапка с эффектом (например Effects/Random_Pack/)
+                    else if (!item.includes('.')) {
+                        const subEffectPath = `${dir.basePath}${item}/Effect.html`;
+                        const found = await addOptionIfValid(subEffectPath, `${item} (Effect.html)`, group, parser);
+
+                        // Если Effect.html не найден, сканируем файлы внутри этой подпапки
+                        if (!found) {
+                            try {
+                                const subResp = await fetch(`${dir.basePath}${item}/`);
+                                if (subResp.ok) {
+                                    const subHtml = await subResp.text();
+                                    const subDoc = parser.parseFromString(subHtml, 'text/html');
+                                    const subLinks = Array.from(subDoc.querySelectorAll('a'))
+                                        .map(a => a.getAttribute('href'))
+                                        .filter(h => h && h.toLowerCase().endsWith('.html'))
+                                        .map(h => decodeURIComponent(h.split('/').pop()));
+
+                                    for (const subFile of [...new Set(subLinks)]) {
+                                        await addOptionIfValid(`${dir.basePath}${item}/${subFile}`, `${item}/${subFile}`, group, parser);
+                                    }
+                                }
+                            } catch(e) {}
+                        }
+                    }
+                }
+
+                if (group.children.length > 0) {
+                    selector.appendChild(group);
+                    totalCount += group.children.length;
+                }
+            } catch (err) {
+                console.warn("Ошибка сканирования:", dir.basePath, err);
+            }
+        }
+
+        if (totalCount > 0) {
+            loadSelectedEffect();
+        } else {
+            selector.innerHTML = '<option value="">Файлы не найдены</option>';
+        }
+    }
+
+    async function addOptionIfValid(filePath, fallbackLabel, group, parser) {
+        try {
+            const fileResp = await fetch(filePath);
+            if (fileResp.ok) {
+                const fileText = await fileResp.text();
+                const fileDoc = parser.parseFromString(fileText, 'text/html');
+                const title = fileDoc.querySelector('title')?.innerText;
+                const displayName = title ? `${title} (${filePath})` : fallbackLabel;
+
+                const opt = document.createElement('option');
+                opt.value = filePath;
+                opt.textContent = displayName;
+                group.appendChild(opt);
+                return true;
+            }
+        } catch(e) {}
+        return false;
+    }
+
+    // 3. ЗАГРУЗКА ВЫБРАННОГО ЭФФЕКТА
+    function loadSelectedEffect() {
+        const filePath = selector.value;
+        if (filePath) {
+            iframe.src = filePath;
+        }
+    }
+
+    // 4. СЧИТЫВАНИЕ META-ТЕГОВ И ПОСТРОЕНИЕ КРУТИЛОК
+    iframe.addEventListener('load', () => {
+        controlsContainer.innerHTML = '';
+
+        const iframeDoc = iframe.contentDocument || iframe.contentWindow.document;
+        const iframeWin = iframe.contentWindow;
+
+        // Авто-растяжение Canvas
+        const style = iframeDoc.createElement('style');
+        style.innerHTML = `
+            html, body { width: 100% !important; height: 100% !important; margin: 0 !important; padding: 0 !important; overflow: hidden !important; background: #000 !important; }
+            canvas { width: 100vw !important; height: 100vh !important; display: block !important; object-fit: fill !important; image-rendering: pixelated !important; }
+        `;
+        iframeDoc.head.appendChild(style);
+
+        // Лок на 60 FPS
+        const originalRAF = iframeWin.requestAnimationFrame;
+        let lastFrameTime = 0;
+        const frameInterval = 1000 / 60;
+        iframeWin.requestAnimationFrame = function(callback) {
+            return originalRAF.call(iframeWin, function step(now) {
+                if (now - lastFrameTime >= frameInterval - 1) {
+                    lastFrameTime = now;
+                    callback(now);
+                } else {
+                    originalRAF.call(iframeWin, step);
+                }
+            });
+        };
+
+        function triggerSignalHook(prop) {
+            const hookName = `on${prop}Changed`;
+            if (typeof iframeWin[hookName] === 'function') {
+                try { iframeWin[hookName](); } catch(e) { console.warn(e); }
+            }
+        }
+
+        const metas = iframeDoc.querySelectorAll('meta[property]');
+        if (metas.length === 0) {
+            controlsContainer.innerHTML = '<span style="font-size:12px; color:#666;">У этого эффекта нет параметров.</span>';
+            return;
+        }
+
+        metas.forEach(meta => {
+            const prop = meta.getAttribute('property');
+            const labelText = meta.getAttribute('label') || prop;
+            const type = meta.getAttribute('type');
+            const def = meta.getAttribute('default');
+
+            const container = document.createElement('div');
+            container.className = 'gui-control';
+
+            // Числа: ползунок + ввод руками
+            if (type === 'number') {
+                const min = parseFloat(meta.getAttribute('min') || 0);
+                const max = parseFloat(meta.getAttribute('max') || 100);
+                const step = parseFloat(meta.getAttribute('step') || 1);
+                
+                iframeWin[prop] = parseFloat(def);
+
+                container.innerHTML = `
+                    <label>${labelText}</label>
+                    <div style="display:flex; gap:8px; align-items:center;">
+                        <input type="range" min="${min}" max="${max}" step="${step}" value="${def}" style="flex:1;">
+                        <input type="number" min="${min}" max="${max}" step="${step}" value="${def}" style="width:70px; background:#12121a; color:#00e5ff; border:1px solid #3b3b54; padding:4px; border-radius:4px; font-family:monospace; font-size:12px; text-align:center;">
+                    </div>
+                `;
+                
+                const rangeInput = container.querySelector('input[type="range"]');
+                const numInput = container.querySelector('input[type="number"]');
+
+                rangeInput.addEventListener('input', (e) => {
+                    numInput.value = e.target.value;
+                    iframeWin[prop] = parseFloat(e.target.value);
+                    triggerSignalHook(prop);
+                });
+
+                numInput.addEventListener('input', (e) => {
+                    rangeInput.value = e.target.value;
+                    iframeWin[prop] = parseFloat(e.target.value) || 0;
+                    triggerSignalHook(prop);
+                });
+            } 
+            // Цвета
+            else if (type === 'color') {
+                iframeWin[prop] = def;
+                container.innerHTML = `
+                    <label>${labelText}</label>
+                    <input type="color" value="${def}">
+                `;
+                container.querySelector('input').addEventListener('input', (e) => {
+                    iframeWin[prop] = e.target.value;
+                    triggerSignalHook(prop);
+                });
+            }
+            // Чекбоксы
+            else if (type === 'boolean') {
+                iframeWin[prop] = (def === 'true' || def === '1');
+                container.className += ' gui-checkbox';
+                container.innerHTML = `
+                    <label>${labelText}</label>
+                    <input type="checkbox" ${iframeWin[prop] ? 'checked' : ''}>
+                `;
+                container.querySelector('input').addEventListener('change', (e) => {
+                    iframeWin[prop] = e.target.checked;
+                    triggerSignalHook(prop);
+                });
+            }
+            // Выпадающие списки
+            else if (type === 'combobox') {
+                const values = (meta.getAttribute('values') || '').split(',');
+                iframeWin[prop] = def;
+                let optionsHtml = values.map(v => `<option value="${v.trim()}" ${v.trim() === def ? 'selected' : ''}>${v.trim()}</option>`).join('');
+                container.innerHTML = `
+                    <label>${labelText}</label>
+                    <select>${optionsHtml}</select>
+                `;
+                container.querySelector('select').addEventListener('change', (e) => {
+                    iframeWin[prop] = e.target.value;
+                    triggerSignalHook(prop);
+                });
+            }
+
+            controlsContainer.appendChild(container);
+            triggerSignalHook(prop);
+        });
+    });
+
+    selector.addEventListener('change', loadSelectedEffect);
+
+    autoScanEffects();
+</script>
+</body>
+</html>
